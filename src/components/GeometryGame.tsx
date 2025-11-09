@@ -7,7 +7,7 @@ interface Obstacle {
   y: number;
   width: number;
   height: number;
-  type: "spike" | "platform";
+  type: "spike" | "platform" | "block" | "double-spike" | "tall-block";
 }
 
 export const GeometryGame = () => {
@@ -31,11 +31,11 @@ export const GeometryGame = () => {
     let playerVelocity = 0;
     const playerSize = 30;
     const playerX = 100;
-    const gravity = 0.6;
-    const jumpForce = -12;
+    const gravity = 0.8;
+    const jumpForce = -14;
     let isJumping = false;
     let obstacles: Obstacle[] = [];
-    let scrollSpeed = 5;
+    let scrollSpeed = 6;
     let distance = 0;
     let lastObstacleX = 800;
 
@@ -78,25 +78,54 @@ export const GeometryGame = () => {
     canvas.addEventListener("click", handleClick);
 
     const createObstacle = (): Obstacle => {
-      const types: ("spike" | "platform")[] = ["spike", "platform"];
+      const types: ("spike" | "platform" | "block" | "double-spike" | "tall-block")[] = 
+        ["spike", "platform", "block", "double-spike", "tall-block"];
       const type = types[Math.floor(Math.random() * types.length)];
       
-      if (type === "spike") {
-        return {
-          x: lastObstacleX + 300 + Math.random() * 200,
-          y: groundY,
-          width: 30,
-          height: 30,
-          type: "spike",
-        };
-      } else {
-        return {
-          x: lastObstacleX + 300 + Math.random() * 200,
-          y: groundY - 100,
-          width: 80,
-          height: 20,
-          type: "platform",
-        };
+      const spacing = 250 + Math.random() * 150;
+      
+      switch (type) {
+        case "spike":
+          return {
+            x: lastObstacleX + spacing,
+            y: groundY,
+            width: 30,
+            height: 30,
+            type: "spike",
+          };
+        case "double-spike":
+          return {
+            x: lastObstacleX + spacing,
+            y: groundY,
+            width: 60,
+            height: 30,
+            type: "double-spike",
+          };
+        case "block":
+          return {
+            x: lastObstacleX + spacing,
+            y: groundY - 30,
+            width: 30,
+            height: 30,
+            type: "block",
+          };
+        case "tall-block":
+          return {
+            x: lastObstacleX + spacing,
+            y: groundY - 60,
+            width: 30,
+            height: 60,
+            type: "tall-block",
+          };
+        case "platform":
+        default:
+          return {
+            x: lastObstacleX + spacing,
+            y: groundY - 80 - Math.random() * 40,
+            width: 80,
+            height: 15,
+            type: "platform",
+          };
       }
     };
 
@@ -124,50 +153,95 @@ export const GeometryGame = () => {
     const drawObstacle = (obstacle: Obstacle) => {
       ctx.save();
       
-      if (obstacle.type === "spike") {
-        // Glow effect
-        ctx.shadowColor = "hsl(330, 100%, 60%)";
-        ctx.shadowBlur = 15;
-        
-        ctx.fillStyle = "hsl(330, 100%, 60%)";
-        ctx.beginPath();
-        ctx.moveTo(obstacle.x + obstacle.width / 2, obstacle.y - obstacle.height);
-        ctx.lineTo(obstacle.x + obstacle.width, obstacle.y);
-        ctx.lineTo(obstacle.x, obstacle.y);
-        ctx.closePath();
-        ctx.fill();
-        
-        ctx.strokeStyle = "hsl(330, 100%, 80%)";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      } else {
-        ctx.shadowColor = "hsl(280, 100%, 65%)";
-        ctx.shadowBlur = 10;
-        
-        ctx.fillStyle = "hsl(280, 100%, 65%)";
-        ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
-        
-        ctx.strokeStyle = "hsl(280, 100%, 80%)";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+      switch (obstacle.type) {
+        case "spike":
+          ctx.shadowColor = "hsl(330, 100%, 60%)";
+          ctx.shadowBlur = 15;
+          ctx.fillStyle = "hsl(330, 100%, 60%)";
+          ctx.beginPath();
+          ctx.moveTo(obstacle.x + obstacle.width / 2, obstacle.y - obstacle.height);
+          ctx.lineTo(obstacle.x + obstacle.width, obstacle.y);
+          ctx.lineTo(obstacle.x, obstacle.y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = "hsl(330, 100%, 80%)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          break;
+          
+        case "double-spike":
+          ctx.shadowColor = "hsl(330, 100%, 60%)";
+          ctx.shadowBlur = 15;
+          ctx.fillStyle = "hsl(330, 100%, 60%)";
+          // First spike
+          ctx.beginPath();
+          ctx.moveTo(obstacle.x + 15, obstacle.y - obstacle.height);
+          ctx.lineTo(obstacle.x + 30, obstacle.y);
+          ctx.lineTo(obstacle.x, obstacle.y);
+          ctx.closePath();
+          ctx.fill();
+          // Second spike
+          ctx.beginPath();
+          ctx.moveTo(obstacle.x + 45, obstacle.y - obstacle.height);
+          ctx.lineTo(obstacle.x + 60, obstacle.y);
+          ctx.lineTo(obstacle.x + 30, obstacle.y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = "hsl(330, 100%, 80%)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          break;
+          
+        case "block":
+          ctx.shadowColor = "hsl(0, 100%, 60%)";
+          ctx.shadowBlur = 15;
+          ctx.fillStyle = "hsl(0, 100%, 60%)";
+          ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+          ctx.strokeStyle = "hsl(0, 100%, 80%)";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+          break;
+          
+        case "tall-block":
+          ctx.shadowColor = "hsl(0, 100%, 60%)";
+          ctx.shadowBlur = 15;
+          ctx.fillStyle = "hsl(0, 100%, 60%)";
+          ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+          ctx.strokeStyle = "hsl(0, 100%, 80%)";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+          break;
+          
+        case "platform":
+        default:
+          ctx.shadowColor = "hsl(280, 100%, 65%)";
+          ctx.shadowBlur = 10;
+          ctx.fillStyle = "hsl(280, 100%, 65%)";
+          ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+          ctx.strokeStyle = "hsl(280, 100%, 80%)";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+          break;
       }
       
       ctx.restore();
     };
 
     const checkCollision = (obstacle: Obstacle): boolean => {
-      if (obstacle.type === "spike") {
+      const margin = 3; // Small margin for more forgiving collision
+      
+      if (obstacle.type === "spike" || obstacle.type === "double-spike") {
         return (
-          playerX < obstacle.x + obstacle.width &&
-          playerX + playerSize > obstacle.x &&
-          playerY + playerSize > obstacle.y - obstacle.height
+          playerX + margin < obstacle.x + obstacle.width - margin &&
+          playerX + playerSize - margin > obstacle.x + margin &&
+          playerY + playerSize - margin > obstacle.y - obstacle.height + margin
         );
       } else {
         return (
-          playerX < obstacle.x + obstacle.width &&
-          playerX + playerSize > obstacle.x &&
-          playerY < obstacle.y + obstacle.height &&
-          playerY + playerSize > obstacle.y
+          playerX + margin < obstacle.x + obstacle.width - margin &&
+          playerX + playerSize - margin > obstacle.x + margin &&
+          playerY + margin < obstacle.y + obstacle.height - margin &&
+          playerY + playerSize - margin > obstacle.y + margin
         );
       }
     };
@@ -228,8 +302,9 @@ export const GeometryGame = () => {
         }
       });
 
-      // Generate new obstacles
-      if (obstacles.length === 0 || obstacles[obstacles.length - 1].x < canvas.width - 300) {
+      // Generate new obstacles continuously
+      const lastObstacle = obstacles[obstacles.length - 1];
+      if (!lastObstacle || lastObstacle.x < canvas.width + 200) {
         const newObstacle = createObstacle();
         obstacles.push(newObstacle);
         lastObstacleX = newObstacle.x;
@@ -242,9 +317,9 @@ export const GeometryGame = () => {
       distance += scrollSpeed * 0.1;
       setScore(Math.floor(distance));
 
-      // Increase difficulty
-      if (distance % 100 < scrollSpeed * 0.1) {
-        scrollSpeed += 0.1;
+      // Gradually increase difficulty
+      if (distance % 200 < scrollSpeed * 0.1 && scrollSpeed < 10) {
+        scrollSpeed += 0.15;
       }
 
       if (gameStarted && !gameOver) {
