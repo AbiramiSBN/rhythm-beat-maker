@@ -57,6 +57,12 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        game: {
+          "bg-start": "hsl(var(--game-bg-start))",
+          "bg-end": "hsl(var(--game-bg-end))",
+          "player-glow": "hsl(var(--player-glow))",
+          "obstacle-glow": "hsl(var(--obstacle-glow))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
