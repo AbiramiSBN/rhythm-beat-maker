@@ -9,12 +9,30 @@ interface Obstacle {
   y: number;
   width: number;
   height: number;
-  type: "spike" | "platform" | "block" | "double-spike" | "tall-block" | "jump-pad";
+  type: "spike" | "platform" | "block" | "double-spike" | "tall-block" | "jump-pad" | "checkpoint";
 }
 
 interface CustomLevel {
   name: string;
   obstacles: Obstacle[];
+}
+
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+  color: string;
+  size: number;
+}
+
+interface LeaderboardEntry {
+  name: string;
+  score: number;
+  date: string;
+  levelName?: string;
 }
 
 export const GeometryGame = () => {
@@ -29,8 +47,12 @@ export const GeometryGame = () => {
   const [gameSpeed, setGameSpeed] = useState(1);
   const [gameGravity, setGameGravity] = useState(0.8);
   const [customLevel, setCustomLevel] = useState<CustomLevel | null>(null);
+  const [practiceMode, setPracticeMode] = useState(false);
+  const [lastCheckpoint, setLastCheckpoint] = useState<number>(0);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const gameLoopRef = useRef<number>();
   const starsRef = useRef<Array<{ x: number; y: number; size: number; speed: number }>>([]);
+  const particlesRef = useRef<Particle[]>([]);
 
   // Initialize parallax stars
   useEffect(() => {
@@ -111,9 +133,32 @@ export const GeometryGame = () => {
     window.addEventListener("keydown", handleKeyDown);
     canvas.addEventListener("click", handleClick);
 
+    const createParticles = (x: number, y: number, count: number, color: string, explosion = false) => {
+      for (let i = 0; i < count; i++) {
+        const angle = explosion ? (Math.PI * 2 * i) / count : Math.random() * Math.PI * 2;
+        const speed = explosion ? 3 + Math.random() * 3 : 1 + Math.random() * 2;
+        particlesRef.current.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1,
+          maxLife: explosion ? 30 : 20,
+          color,
+          size: explosion ? 3 + Math.random() * 3 : 2 + Math.random() * 2,
+        });
+      }
+    };
+
     const createObstacle = (): Obstacle => {
-      const types: ("spike" | "platform" | "block" | "double-spike" | "tall-block" | "jump-pad")[] = 
+      const types: ("spike" | "platform" | "block" | "double-spike" | "tall-block" | "jump-pad" | "checkpoint")[] = 
         ["spike", "platform", "block", "double-spike", "tall-block", "jump-pad"];
+      
+      // Add checkpoint every 1000 units in practice mode
+      if (practiceMode && Math.random() < 0.1) {
+        types.push("checkpoint", "checkpoint");
+      }
+      
       const type = types[Math.floor(Math.random() * types.length)];
       
       const spacing = 250 + Math.random() * 150;
@@ -159,6 +204,14 @@ export const GeometryGame = () => {
             height: 10,
             type: "jump-pad",
           };
+        case "checkpoint":
+          return {
+            x: lastObstacleX + spacing,
+            y: groundY - 80,
+            width: 50,
+            height: 80,
+            type: "checkpoint",
+          };
         case "platform":
         default:
           return {
@@ -172,6 +225,16 @@ export const GeometryGame = () => {
     };
 
     const drawPlayer = () => {
+      // Create trail particles
+      if (gameStarted && !gameOver) {
+        createParticles(
+          playerX + playerSize / 2,
+          playerY + playerSize / 2,
+          2,
+          boosting ? "hsl(60, 100%, 50%)" : "hsl(180, 100%, 50%)"
+        );
+      }
+
       ctx.save();
       ctx.translate(playerX + playerSize / 2, playerY + playerSize / 2);
       ctx.rotate(distance * 0.05);
@@ -269,6 +332,24 @@ export const GeometryGame = () => {
           ctx.lineWidth = 2;
           ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
           break;
+
+        case "checkpoint":
+          ctx.shadowColor = "hsl(200, 100%, 50%)";
+          ctx.shadowBlur = 20;
+          ctx.strokeStyle = "hsl(200, 100%, 50%)";
+          ctx.lineWidth = 3;
+          ctx.setLineDash([5, 5]);
+          ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+          ctx.setLineDash([]);
+          // Flag
+          ctx.fillStyle = "hsl(200, 100%, 60%)";
+          ctx.beginPath();
+          ctx.moveTo(obstacle.x + obstacle.width / 2, obstacle.y);
+          ctx.lineTo(obstacle.x + obstacle.width / 2 + 20, obstacle.y + 10);
+          ctx.lineTo(obstacle.x + obstacle.width / 2, obstacle.y + 20);
+          ctx.closePath();
+          ctx.fill();
+          break;
           
         case "platform":
         default:
@@ -288,7 +369,20 @@ export const GeometryGame = () => {
     const checkCollision = (obstacle: Obstacle): boolean => {
       const margin = 3;
       
-      if (obstacle.type === "spike" || obstacle.type === "double-spike") {
+      if (obstacle.type === "checkpoint") {
+        // Check if player passes through checkpoint
+        if (
+          playerX + margin < obstacle.x + obstacle.width - margin &&
+          playerX + playerSize - margin > obstacle.x + margin &&
+          playerY + margin < obstacle.y + obstacle.height - margin &&
+          playerY + playerSize - margin > obstacle.y + margin
+        ) {
+          if (practiceMode && distance > lastCheckpoint) {
+            setLastCheckpoint(distance);
+          }
+        }
+        return false;
+      } else if (obstacle.type === "spike" || obstacle.type === "double-spike") {
         return (
           playerX + margin < obstacle.x + obstacle.width - margin &&
           playerX + playerSize - margin > obstacle.x + margin &&
@@ -350,6 +444,22 @@ export const GeometryGame = () => {
         ctx.stroke();
       }
 
+      // Draw particles
+      particlesRef.current = particlesRef.current.filter((particle) => {
+        particle.x += particle.vx;
+        particle.y += particle.vy;
+        particle.vy += 0.2; // Gravity
+        particle.life--;
+        
+        const alpha = particle.life / particle.maxLife;
+        ctx.fillStyle = particle.color.replace(')', `, ${alpha})`).replace('hsl', 'hsla');
+        ctx.beginPath();
+        ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+        ctx.fill();
+        
+        return particle.life > 0;
+      });
+
       // Draw ground line (fast layer)
       ctx.strokeStyle = "hsl(180, 100%, 50%)";
       ctx.lineWidth = 3;
@@ -381,11 +491,22 @@ export const GeometryGame = () => {
         drawObstacle(obstacle);
 
         if (checkCollision(obstacle)) {
-          setGameOver(true);
-          setGameStarted(false);
-          if (audioRef.current) {
-            audioRef.current.pause();
-            audioRef.current.currentTime = 0;
+          // Create explosion
+          createParticles(playerX + playerSize / 2, playerY + playerSize / 2, 20, "hsl(0, 100%, 50%)", true);
+          
+          if (practiceMode) {
+            // Respawn at checkpoint
+            distance = lastCheckpoint;
+            playerY = 300;
+            playerVelocity = 0;
+            obstacles = obstacles.filter(o => o.x < distance + 800);
+          } else {
+            setGameOver(true);
+            setGameStarted(false);
+            if (audioRef.current) {
+              audioRef.current.pause();
+              audioRef.current.currentTime = 0;
+            }
           }
         }
       });
@@ -436,11 +557,48 @@ export const GeometryGame = () => {
         cancelAnimationFrame(gameLoopRef.current);
       }
     };
-  }, [gameStarted, gameOver, isMuted, gameSpeed, gameGravity, customLevel]);
+  }, [gameStarted, gameOver, isMuted, gameSpeed, gameGravity, customLevel, practiceMode, lastCheckpoint]);
+
+  // Cache audio file
+  useEffect(() => {
+    if (audioRef.current) {
+      fetch('/game-music.mp3')
+        .then(response => response.blob())
+        .then(blob => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            localStorage.setItem('cachedGameMusic', reader.result as string);
+          };
+          reader.readAsDataURL(blob);
+        })
+        .catch(console.error);
+    }
+  }, []);
 
   const startGame = () => {
     setGameStarted(true);
     setGameOver(false);
+    setLastCheckpoint(0);
+    
+    if (gameOver && !practiceMode) {
+      // Save score to leaderboard
+      const playerName = prompt("Enter your name for the leaderboard:");
+      if (playerName) {
+        const entry: LeaderboardEntry = {
+          name: playerName,
+          score,
+          date: new Date().toISOString(),
+          levelName: customLevel?.name,
+        };
+        
+        const key = customLevel ? `leaderboard-${customLevel.name}` : 'leaderboard-random';
+        const stored = localStorage.getItem(key);
+        const leaderboard: LeaderboardEntry[] = stored ? JSON.parse(stored) : [];
+        leaderboard.push(entry);
+        leaderboard.sort((a, b) => b.score - a.score);
+        localStorage.setItem(key, JSON.stringify(leaderboard.slice(0, 10)));
+      }
+    }
   };
 
   const toggleMute = () => {
@@ -457,6 +615,70 @@ export const GeometryGame = () => {
 
   if (showEditor) {
     return <LevelEditor onBack={() => setShowEditor(false)} onLoadLevel={handleLoadLevel} />;
+  }
+
+  if (showLeaderboard) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-game-bg-start to-game-bg-end p-4">
+        <div className="max-w-2xl w-full">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-4xl font-bold text-primary">Leaderboards</h2>
+            <Button onClick={() => setShowLeaderboard(false)} variant="outline">Back</Button>
+          </div>
+          
+          <div className="space-y-6">
+            <div className="bg-background/50 backdrop-blur-sm rounded-lg p-6 border border-primary/20">
+              <h3 className="text-2xl font-bold mb-4 text-foreground">Random Mode</h3>
+              {(() => {
+                const stored = localStorage.getItem('leaderboard-random');
+                const leaderboard: LeaderboardEntry[] = stored ? JSON.parse(stored) : [];
+                return leaderboard.length > 0 ? (
+                  <div className="space-y-2">
+                    {leaderboard.map((entry, i) => (
+                      <div key={i} className="flex justify-between items-center p-3 bg-background/30 rounded">
+                        <span className="text-primary font-bold">{i + 1}.</span>
+                        <span className="flex-1 mx-4 text-foreground">{entry.name}</span>
+                        <span className="text-accent font-bold">{entry.score}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">No scores yet!</p>
+                );
+              })()}
+            </div>
+
+            {(() => {
+              const customLevels = Object.keys(localStorage).filter(k => k.startsWith('leaderboard-') && k !== 'leaderboard-random');
+              return customLevels.map(key => {
+                const levelName = key.replace('leaderboard-', '');
+                const stored = localStorage.getItem(key);
+                const leaderboard: LeaderboardEntry[] = stored ? JSON.parse(stored) : [];
+                
+                return (
+                  <div key={key} className="bg-background/50 backdrop-blur-sm rounded-lg p-6 border border-secondary/20">
+                    <h3 className="text-2xl font-bold mb-4 text-foreground">{levelName}</h3>
+                    {leaderboard.length > 0 ? (
+                      <div className="space-y-2">
+                        {leaderboard.map((entry, i) => (
+                          <div key={i} className="flex justify-between items-center p-3 bg-background/30 rounded">
+                            <span className="text-secondary font-bold">{i + 1}.</span>
+                            <span className="flex-1 mx-4 text-foreground">{entry.name}</span>
+                            <span className="text-accent font-bold">{entry.score}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground">No scores yet!</p>
+                    )}
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -500,9 +722,10 @@ export const GeometryGame = () => {
         )}
       </div>
 
-      <div className="mt-6 flex items-center gap-4">
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
         <div className="text-2xl font-bold text-primary">
           Score: <span className="text-foreground">{score}</span>
+          {practiceMode && <span className="text-sm text-accent ml-2">(Practice Mode)</span>}
         </div>
         <Button
           onClick={toggleMute}
@@ -528,6 +751,19 @@ export const GeometryGame = () => {
         >
           <Edit className="h-5 w-5" />
         </Button>
+        <Button
+          onClick={() => setPracticeMode(!practiceMode)}
+          variant="outline"
+          className={practiceMode ? "border-accent text-accent" : ""}
+        >
+          Practice Mode
+        </Button>
+        <Button
+          onClick={() => setShowLeaderboard(true)}
+          variant="outline"
+        >
+          Leaderboards
+        </Button>
       </div>
 
       {showControls && (
@@ -539,8 +775,9 @@ export const GeometryGame = () => {
         />
       )}
 
-      <div className="mt-4 text-sm text-muted-foreground">
+      <div className="mt-4 text-sm text-muted-foreground text-center">
         Controls: SPACE or CLICK to jump {customLevel && `| Playing: ${customLevel.name}`}
+        {practiceMode && lastCheckpoint > 0 && ` | Last Checkpoint: ${Math.floor(lastCheckpoint)}`}
       </div>
       
       {customLevel && (
