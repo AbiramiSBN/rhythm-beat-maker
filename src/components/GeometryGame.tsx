@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Play, RotateCcw, Volume2, VolumeX, Settings, Edit } from "lucide-react";
+import { Play, RotateCcw, Volume2, VolumeX, Settings, Edit, Shield, Zap, Clock } from "lucide-react";
 import { LevelEditor } from "@/components/LevelEditor";
 import { GameControls } from "@/components/GameControls";
+import { Leaderboard } from "@/components/Leaderboard";
 
 interface Obstacle {
   x: number;
@@ -35,6 +36,74 @@ interface LeaderboardEntry {
   levelName?: string;
 }
 
+interface PowerUp {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  type: "shield" | "slow-motion" | "invincibility";
+}
+
+interface Theme {
+  name: string;
+  player: string;
+  playerGlow: string;
+  ground: string;
+  spike: string;
+  block: string;
+  platform: string;
+  jumpPad: string;
+  checkpoint: string;
+  bgStart: string;
+  bgEnd: string;
+  gridColor: string;
+}
+
+const THEMES: Record<string, Theme> = {
+  neon: {
+    name: "Neon",
+    player: "hsl(180, 100%, 50%)",
+    playerGlow: "hsl(180, 100%, 50%)",
+    ground: "hsl(180, 100%, 50%)",
+    spike: "hsl(330, 100%, 60%)",
+    block: "hsl(0, 100%, 60%)",
+    platform: "hsl(280, 100%, 65%)",
+    jumpPad: "hsl(120, 100%, 50%)",
+    checkpoint: "hsl(200, 100%, 50%)",
+    bgStart: "hsl(240, 30%, 6%)",
+    bgEnd: "hsl(280, 40%, 12%)",
+    gridColor: "hsl(240, 20%, 15%)",
+  },
+  retro: {
+    name: "Retro",
+    player: "hsl(60, 100%, 50%)",
+    playerGlow: "hsl(60, 100%, 70%)",
+    ground: "hsl(120, 50%, 40%)",
+    spike: "hsl(0, 80%, 50%)",
+    block: "hsl(30, 100%, 50%)",
+    platform: "hsl(180, 60%, 50%)",
+    jumpPad: "hsl(90, 100%, 50%)",
+    checkpoint: "hsl(270, 70%, 60%)",
+    bgStart: "hsl(220, 20%, 10%)",
+    bgEnd: "hsl(220, 30%, 20%)",
+    gridColor: "hsl(220, 10%, 25%)",
+  },
+  space: {
+    name: "Space",
+    player: "hsl(200, 100%, 60%)",
+    playerGlow: "hsl(200, 100%, 80%)",
+    ground: "hsl(260, 60%, 50%)",
+    spike: "hsl(320, 100%, 50%)",
+    block: "hsl(280, 80%, 60%)",
+    platform: "hsl(240, 100%, 60%)",
+    jumpPad: "hsl(160, 100%, 50%)",
+    checkpoint: "hsl(190, 100%, 60%)",
+    bgStart: "hsl(240, 50%, 5%)",
+    bgEnd: "hsl(260, 40%, 10%)",
+    gridColor: "hsl(250, 30%, 15%)",
+  },
+};
+
 export const GeometryGame = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -50,9 +119,16 @@ export const GeometryGame = () => {
   const [practiceMode, setPracticeMode] = useState(false);
   const [lastCheckpoint, setLastCheckpoint] = useState<number>(0);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [currentTheme, setCurrentTheme] = useState<string>("neon");
+  const [combo, setCombo] = useState(0);
+  const [multiplier, setMultiplier] = useState(1);
+  const [activePowerUp, setActivePowerUp] = useState<string | null>(null);
+  const [powerUpTimer, setPowerUpTimer] = useState(0);
   const gameLoopRef = useRef<number>();
   const starsRef = useRef<Array<{ x: number; y: number; size: number; speed: number }>>([]);
   const particlesRef = useRef<Particle[]>([]);
+  const powerUpsRef = useRef<PowerUp[]>([]);
+  const lastObstaclePassedRef = useRef<number>(0);
 
   // Initialize parallax stars
   useEffect(() => {
@@ -106,8 +182,14 @@ export const GeometryGame = () => {
       boosting = false;
       boostTimer = 0;
       gravity = gameGravity;
+      powerUpsRef.current = [];
+      lastObstaclePassedRef.current = 0;
       setScore(0);
       setGameOver(false);
+      setCombo(0);
+      setMultiplier(1);
+      setActivePowerUp(null);
+      setPowerUpTimer(0);
     };
 
     const jump = () => {
@@ -133,6 +215,8 @@ export const GeometryGame = () => {
     window.addEventListener("keydown", handleKeyDown);
     canvas.addEventListener("click", handleClick);
 
+    const theme = THEMES[currentTheme];
+
     const createParticles = (x: number, y: number, count: number, color: string, explosion = false) => {
       for (let i = 0; i < count; i++) {
         const angle = explosion ? (Math.PI * 2 * i) / count : Math.random() * Math.PI * 2;
@@ -148,6 +232,19 @@ export const GeometryGame = () => {
           size: explosion ? 3 + Math.random() * 3 : 2 + Math.random() * 2,
         });
       }
+    };
+
+    const createPowerUp = (): PowerUp => {
+      const types: ("shield" | "slow-motion" | "invincibility")[] = ["shield", "slow-motion", "invincibility"];
+      const type = types[Math.floor(Math.random() * types.length)];
+      
+      return {
+        x: lastObstacleX + 300 + Math.random() * 200,
+        y: groundY - 100 - Math.random() * 100,
+        width: 30,
+        height: 30,
+        type,
+      };
     };
 
     const createObstacle = (): Obstacle => {
@@ -231,7 +328,7 @@ export const GeometryGame = () => {
           playerX + playerSize / 2,
           playerY + playerSize / 2,
           2,
-          boosting ? "hsl(60, 100%, 50%)" : "hsl(180, 100%, 50%)"
+          boosting ? theme.playerGlow : theme.player
         );
       }
 
@@ -239,18 +336,61 @@ export const GeometryGame = () => {
       ctx.translate(playerX + playerSize / 2, playerY + playerSize / 2);
       ctx.rotate(distance * 0.05);
       
-      // Glow effect (enhanced when boosting)
-      ctx.shadowColor = boosting ? "hsl(60, 100%, 50%)" : "hsl(180, 100%, 50%)";
+      // Glow effect
+      ctx.shadowColor = boosting ? theme.playerGlow : theme.player;
       ctx.shadowBlur = boosting ? 30 : 20;
       
+      // Shield effect
+      if (activePowerUp === "shield") {
+        ctx.strokeStyle = "hsl(200, 100%, 60%)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, playerSize / 2 + 8, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      
+      // Invincibility effect
+      if (activePowerUp === "invincibility") {
+        ctx.globalAlpha = 0.7;
+      }
+      
       // Player cube
-      ctx.fillStyle = boosting ? "hsl(60, 100%, 50%)" : "hsl(180, 100%, 50%)";
+      ctx.fillStyle = boosting ? theme.playerGlow : theme.player;
       ctx.fillRect(-playerSize / 2, -playerSize / 2, playerSize, playerSize);
       
       // Border
-      ctx.strokeStyle = boosting ? "hsl(60, 100%, 70%)" : "hsl(180, 100%, 70%)";
+      ctx.strokeStyle = boosting ? theme.playerGlow : theme.player;
       ctx.lineWidth = 2;
       ctx.strokeRect(-playerSize / 2, -playerSize / 2, playerSize, playerSize);
+      
+      ctx.restore();
+    };
+
+    const drawPowerUp = (powerUp: PowerUp) => {
+      ctx.save();
+      
+      const colors = {
+        shield: "hsl(200, 100%, 60%)",
+        "slow-motion": "hsl(280, 100%, 60%)",
+        invincibility: "hsl(50, 100%, 60%)",
+      };
+      
+      ctx.shadowColor = colors[powerUp.type];
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = colors[powerUp.type];
+      ctx.beginPath();
+      ctx.arc(powerUp.x + powerUp.width / 2, powerUp.y + powerUp.height / 2, powerUp.width / 2, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Icon
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 2;
+      ctx.font = "20px Arial";
+      ctx.fillStyle = "white";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const icons = { shield: "🛡️", "slow-motion": "⏱️", invincibility: "✨" };
+      ctx.fillText(icons[powerUp.type], powerUp.x + powerUp.width / 2, powerUp.y + powerUp.height / 2);
       
       ctx.restore();
     };
@@ -260,24 +400,24 @@ export const GeometryGame = () => {
       
       switch (obstacle.type) {
         case "spike":
-          ctx.shadowColor = "hsl(330, 100%, 60%)";
+          ctx.shadowColor = theme.spike;
           ctx.shadowBlur = 15;
-          ctx.fillStyle = "hsl(330, 100%, 60%)";
+          ctx.fillStyle = theme.spike;
           ctx.beginPath();
           ctx.moveTo(obstacle.x + obstacle.width / 2, obstacle.y - obstacle.height);
           ctx.lineTo(obstacle.x + obstacle.width, obstacle.y);
           ctx.lineTo(obstacle.x, obstacle.y);
           ctx.closePath();
           ctx.fill();
-          ctx.strokeStyle = "hsl(330, 100%, 80%)";
+          ctx.strokeStyle = theme.spike;
           ctx.lineWidth = 2;
           ctx.stroke();
           break;
           
         case "double-spike":
-          ctx.shadowColor = "hsl(330, 100%, 60%)";
+          ctx.shadowColor = theme.spike;
           ctx.shadowBlur = 15;
-          ctx.fillStyle = "hsl(330, 100%, 60%)";
+          ctx.fillStyle = theme.spike;
           ctx.beginPath();
           ctx.moveTo(obstacle.x + 15, obstacle.y - obstacle.height);
           ctx.lineTo(obstacle.x + 30, obstacle.y);
@@ -290,59 +430,59 @@ export const GeometryGame = () => {
           ctx.lineTo(obstacle.x + 30, obstacle.y);
           ctx.closePath();
           ctx.fill();
-          ctx.strokeStyle = "hsl(330, 100%, 80%)";
+          ctx.strokeStyle = theme.spike;
           ctx.lineWidth = 2;
           ctx.stroke();
           break;
           
         case "block":
-          ctx.shadowColor = "hsl(0, 100%, 60%)";
+          ctx.shadowColor = theme.block;
           ctx.shadowBlur = 15;
-          ctx.fillStyle = "hsl(0, 100%, 60%)";
+          ctx.fillStyle = theme.block;
           ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
-          ctx.strokeStyle = "hsl(0, 100%, 80%)";
+          ctx.strokeStyle = theme.block;
           ctx.lineWidth = 2;
           ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
           break;
           
         case "tall-block":
-          ctx.shadowColor = "hsl(0, 100%, 60%)";
+          ctx.shadowColor = theme.block;
           ctx.shadowBlur = 15;
-          ctx.fillStyle = "hsl(0, 100%, 60%)";
+          ctx.fillStyle = theme.block;
           ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
-          ctx.strokeStyle = "hsl(0, 100%, 80%)";
+          ctx.strokeStyle = theme.block;
           ctx.lineWidth = 2;
           ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
           break;
           
         case "jump-pad":
-          ctx.shadowColor = "hsl(120, 100%, 50%)";
+          ctx.shadowColor = theme.jumpPad;
           ctx.shadowBlur = 20;
-          ctx.fillStyle = "hsl(120, 100%, 50%)";
+          ctx.fillStyle = theme.jumpPad;
           ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
           // Arrow indicator
-          ctx.fillStyle = "hsl(120, 100%, 70%)";
+          ctx.fillStyle = theme.jumpPad;
           ctx.beginPath();
           ctx.moveTo(obstacle.x + obstacle.width / 2, obstacle.y - 15);
           ctx.lineTo(obstacle.x + obstacle.width / 2 - 8, obstacle.y - 5);
           ctx.lineTo(obstacle.x + obstacle.width / 2 + 8, obstacle.y - 5);
           ctx.closePath();
           ctx.fill();
-          ctx.strokeStyle = "hsl(120, 100%, 80%)";
+          ctx.strokeStyle = theme.jumpPad;
           ctx.lineWidth = 2;
           ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
           break;
 
         case "checkpoint":
-          ctx.shadowColor = "hsl(200, 100%, 50%)";
+          ctx.shadowColor = theme.checkpoint;
           ctx.shadowBlur = 20;
-          ctx.strokeStyle = "hsl(200, 100%, 50%)";
+          ctx.strokeStyle = theme.checkpoint;
           ctx.lineWidth = 3;
           ctx.setLineDash([5, 5]);
           ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
           ctx.setLineDash([]);
           // Flag
-          ctx.fillStyle = "hsl(200, 100%, 60%)";
+          ctx.fillStyle = theme.checkpoint;
           ctx.beginPath();
           ctx.moveTo(obstacle.x + obstacle.width / 2, obstacle.y);
           ctx.lineTo(obstacle.x + obstacle.width / 2 + 20, obstacle.y + 10);
@@ -353,11 +493,11 @@ export const GeometryGame = () => {
           
         case "platform":
         default:
-          ctx.shadowColor = "hsl(280, 100%, 65%)";
+          ctx.shadowColor = theme.platform;
           ctx.shadowBlur = 10;
-          ctx.fillStyle = "hsl(280, 100%, 65%)";
+          ctx.fillStyle = theme.platform;
           ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
-          ctx.strokeStyle = "hsl(280, 100%, 80%)";
+          ctx.strokeStyle = theme.platform;
           ctx.lineWidth = 2;
           ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
           break;
@@ -417,8 +557,8 @@ export const GeometryGame = () => {
 
       // Clear canvas with gradient background
       const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      gradient.addColorStop(0, "hsl(240, 30%, 6%)");
-      gradient.addColorStop(1, "hsl(280, 40%, 12%)");
+      gradient.addColorStop(0, theme.bgStart);
+      gradient.addColorStop(1, theme.bgEnd);
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -434,7 +574,7 @@ export const GeometryGame = () => {
       });
 
       // Grid effect (medium layer)
-      ctx.strokeStyle = "hsl(240, 20%, 15%)";
+      ctx.strokeStyle = theme.gridColor;
       ctx.lineWidth = 1;
       for (let i = 0; i < canvas.width; i += 50) {
         const offset = (distance * 0.5) % 50;
@@ -461,12 +601,24 @@ export const GeometryGame = () => {
       });
 
       // Draw ground line (fast layer)
-      ctx.strokeStyle = "hsl(180, 100%, 50%)";
+      ctx.strokeStyle = theme.ground;
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(0, groundY);
       ctx.lineTo(canvas.width, groundY);
       ctx.stroke();
+
+      // Update power-up timer
+      if (powerUpTimer > 0) {
+        setPowerUpTimer(powerUpTimer - 1);
+        if (powerUpTimer === 1) {
+          setActivePowerUp(null);
+          if (activePowerUp === "slow-motion") {
+            scrollSpeed = 6 * gameSpeed;
+            if (audioRef.current) audioRef.current.playbackRate = gameSpeed;
+          }
+        }
+      }
 
       // Update physics
       if (boostTimer > 0) {
@@ -490,9 +642,32 @@ export const GeometryGame = () => {
         obstacle.x -= scrollSpeed;
         drawObstacle(obstacle);
 
+        // Track combo for passing obstacles
+        if (obstacle.x + obstacle.width < playerX && obstacle.x + obstacle.width > lastObstaclePassedRef.current) {
+          if (obstacle.type !== "checkpoint" && obstacle.type !== "platform") {
+            lastObstaclePassedRef.current = obstacle.x + obstacle.width;
+            setCombo(prev => prev + 1);
+            const newMultiplier = Math.min(Math.floor(combo / 5) + 1, 5);
+            setMultiplier(newMultiplier);
+          }
+        }
+
         if (checkCollision(obstacle)) {
+          // Skip collision if invincible
+          if (activePowerUp === "invincibility") return;
+          
+          // Use shield
+          if (activePowerUp === "shield") {
+            setActivePowerUp(null);
+            setPowerUpTimer(0);
+            createParticles(playerX + playerSize / 2, playerY + playerSize / 2, 15, "hsl(200, 100%, 60%)", true);
+            return;
+          }
+          
           // Create explosion
-          createParticles(playerX + playerSize / 2, playerY + playerSize / 2, 20, "hsl(0, 100%, 50%)", true);
+          createParticles(playerX + playerSize / 2, playerY + playerSize / 2, 20, theme.spike, true);
+          setCombo(0);
+          setMultiplier(1);
           
           if (practiceMode) {
             // Respawn at checkpoint
@@ -511,6 +686,31 @@ export const GeometryGame = () => {
         }
       });
 
+      // Update power-ups
+      powerUpsRef.current = powerUpsRef.current.filter((powerUp) => powerUp.x > -100);
+      powerUpsRef.current.forEach((powerUp) => {
+        powerUp.x -= scrollSpeed;
+        drawPowerUp(powerUp);
+
+        // Check collision with power-up
+        if (
+          playerX < powerUp.x + powerUp.width &&
+          playerX + playerSize > powerUp.x &&
+          playerY < powerUp.y + powerUp.height &&
+          playerY + playerSize > powerUp.y
+        ) {
+          setActivePowerUp(powerUp.type);
+          setPowerUpTimer(300); // 5 seconds at 60fps
+          powerUpsRef.current = powerUpsRef.current.filter(p => p !== powerUp);
+          createParticles(powerUp.x + powerUp.width / 2, powerUp.y + powerUp.height / 2, 10, "hsl(60, 100%, 50%)", true);
+          
+          if (powerUp.type === "slow-motion") {
+            scrollSpeed = 3 * gameSpeed;
+            if (audioRef.current) audioRef.current.playbackRate = gameSpeed * 0.5;
+          }
+        }
+      });
+
       // Generate new obstacles continuously (only in random mode)
       if (!customLevel) {
         const lastObstacle = obstacles[obstacles.length - 1];
@@ -519,14 +719,19 @@ export const GeometryGame = () => {
           obstacles.push(newObstacle);
           lastObstacleX = newObstacle.x;
         }
+        
+        // Spawn power-ups occasionally
+        if (Math.random() < 0.01 && powerUpsRef.current.length < 2) {
+          powerUpsRef.current.push(createPowerUp());
+        }
       }
 
       // Draw player
       drawPlayer();
 
-      // Update score
+      // Update score with multiplier
       distance += scrollSpeed * 0.1;
-      setScore(Math.floor(distance));
+      setScore(Math.floor(distance * multiplier));
 
       // Gradually increase difficulty (only in random mode)
       if (!customLevel && distance % 200 < scrollSpeed * 0.1 && scrollSpeed < 10 * gameSpeed) {
@@ -618,67 +823,7 @@ export const GeometryGame = () => {
   }
 
   if (showLeaderboard) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-game-bg-start to-game-bg-end p-4">
-        <div className="max-w-2xl w-full">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-4xl font-bold text-primary">Leaderboards</h2>
-            <Button onClick={() => setShowLeaderboard(false)} variant="outline">Back</Button>
-          </div>
-          
-          <div className="space-y-6">
-            <div className="bg-background/50 backdrop-blur-sm rounded-lg p-6 border border-primary/20">
-              <h3 className="text-2xl font-bold mb-4 text-foreground">Random Mode</h3>
-              {(() => {
-                const stored = localStorage.getItem('leaderboard-random');
-                const leaderboard: LeaderboardEntry[] = stored ? JSON.parse(stored) : [];
-                return leaderboard.length > 0 ? (
-                  <div className="space-y-2">
-                    {leaderboard.map((entry, i) => (
-                      <div key={i} className="flex justify-between items-center p-3 bg-background/30 rounded">
-                        <span className="text-primary font-bold">{i + 1}.</span>
-                        <span className="flex-1 mx-4 text-foreground">{entry.name}</span>
-                        <span className="text-accent font-bold">{entry.score}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground">No scores yet!</p>
-                );
-              })()}
-            </div>
-
-            {(() => {
-              const customLevels = Object.keys(localStorage).filter(k => k.startsWith('leaderboard-') && k !== 'leaderboard-random');
-              return customLevels.map(key => {
-                const levelName = key.replace('leaderboard-', '');
-                const stored = localStorage.getItem(key);
-                const leaderboard: LeaderboardEntry[] = stored ? JSON.parse(stored) : [];
-                
-                return (
-                  <div key={key} className="bg-background/50 backdrop-blur-sm rounded-lg p-6 border border-secondary/20">
-                    <h3 className="text-2xl font-bold mb-4 text-foreground">{levelName}</h3>
-                    {leaderboard.length > 0 ? (
-                      <div className="space-y-2">
-                        {leaderboard.map((entry, i) => (
-                          <div key={i} className="flex justify-between items-center p-3 bg-background/30 rounded">
-                            <span className="text-secondary font-bold">{i + 1}.</span>
-                            <span className="flex-1 mx-4 text-foreground">{entry.name}</span>
-                            <span className="text-accent font-bold">{entry.score}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-muted-foreground">No scores yet!</p>
-                    )}
-                  </div>
-                );
-              });
-            })()}
-          </div>
-        </div>
-      </div>
-    );
+    return <Leaderboard onBack={() => setShowLeaderboard(false)} />;
   }
 
   return (
@@ -725,8 +870,23 @@ export const GeometryGame = () => {
       <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
         <div className="text-2xl font-bold text-primary">
           Score: <span className="text-foreground">{score}</span>
-          {practiceMode && <span className="text-sm text-accent ml-2">(Practice Mode)</span>}
+          {multiplier > 1 && <span className="text-accent ml-2">x{multiplier}</span>}
+          {practiceMode && <span className="text-sm text-muted-foreground ml-2">(Practice)</span>}
         </div>
+        {combo > 0 && (
+          <div className="text-lg font-bold text-accent animate-pulse">
+            Combo: {combo}
+          </div>
+        )}
+        {activePowerUp && (
+          <div className="flex items-center gap-2 px-3 py-1 bg-accent/20 rounded-full">
+            {activePowerUp === "shield" && <Shield className="h-4 w-4" />}
+            {activePowerUp === "slow-motion" && <Clock className="h-4 w-4" />}
+            {activePowerUp === "invincibility" && <Zap className="h-4 w-4" />}
+            <span className="text-sm font-bold capitalize">{activePowerUp}</span>
+            <span className="text-xs">({Math.ceil(powerUpTimer / 60)}s)</span>
+          </div>
+        )}
         <Button
           onClick={toggleMute}
           variant="outline"
@@ -764,6 +924,19 @@ export const GeometryGame = () => {
         >
           Leaderboards
         </Button>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Theme:</span>
+          {Object.keys(THEMES).map((themeKey) => (
+            <Button
+              key={themeKey}
+              onClick={() => setCurrentTheme(themeKey)}
+              variant={currentTheme === themeKey ? "default" : "outline"}
+              size="sm"
+            >
+              {THEMES[themeKey].name}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {showControls && (
