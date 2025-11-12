@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Play, RotateCcw, Volume2, VolumeX, Settings, Edit, Shield, Zap, Clock } from "lucide-react";
+import { Play, RotateCcw, Volume2, VolumeX, Settings, Edit, Shield, Zap, Clock, Film, Trophy } from "lucide-react";
 import { LevelEditor } from "@/components/LevelEditor";
 import { GameControls } from "@/components/GameControls";
 import { Leaderboard } from "@/components/Leaderboard";
+import { DailyChallenges } from "@/components/DailyChallenges";
+import { ReplayViewer } from "@/components/ReplayViewer";
+import { soundManager } from "@/lib/sounds";
 
 interface Obstacle {
   x: number;
@@ -34,6 +37,33 @@ interface LeaderboardEntry {
   score: number;
   date: string;
   levelName?: string;
+}
+
+interface ReplayFrame {
+  playerY: number;
+  playerVelocity: number;
+  distance: number;
+  score: number;
+  obstacles: any[];
+}
+
+interface GhostFrame {
+  playerY: number;
+  distance: number;
+}
+
+interface Challenge {
+  id: string;
+  name: string;
+  description: string;
+  objective: string;
+  date: string;
+  obstacles: any[];
+  targetScore?: number;
+  collectAllPowerUps?: boolean;
+  noShield?: boolean;
+  completed?: boolean;
+  bestScore?: number;
 }
 
 interface PowerUp {
@@ -124,11 +154,21 @@ export const GeometryGame = () => {
   const [multiplier, setMultiplier] = useState(1);
   const [activePowerUp, setActivePowerUp] = useState<string | null>(null);
   const [powerUpTimer, setPowerUpTimer] = useState(0);
+  const [showReplays, setShowReplays] = useState(false);
+  const [showChallenges, setShowChallenges] = useState(false);
+  const [currentChallenge, setCurrentChallenge] = useState<Challenge | null>(null);
+  const [isSoundEnabled, setIsSoundEnabled] = useState(true);
+  const [showGhost, setShowGhost] = useState(true);
   const gameLoopRef = useRef<number>();
   const starsRef = useRef<Array<{ x: number; y: number; size: number; speed: number }>>([]);
   const particlesRef = useRef<Particle[]>([]);
   const powerUpsRef = useRef<PowerUp[]>([]);
   const lastObstaclePassedRef = useRef<number>(0);
+  const replayFramesRef = useRef<ReplayFrame[]>([]);
+  const ghostFramesRef = useRef<GhostFrame[]>([]);
+  const bestScoreRef = useRef<number>(0);
+  const powerUpsCollectedRef = useRef<number>(0);
+  const totalPowerUpsRef = useRef<number>(0);
 
   // Initialize parallax stars
   useEffect(() => {
@@ -175,27 +215,40 @@ export const GeometryGame = () => {
       playerY = 300;
       playerVelocity = 0;
       isJumping = false;
-      obstacles = customLevel ? [...customLevel.obstacles] : [];
+      obstacles = customLevel || currentChallenge ? [...(customLevel?.obstacles || currentChallenge?.obstacles || [])] : [];
       scrollSpeed = 6 * gameSpeed;
       distance = 0;
-      lastObstacleX = customLevel ? Math.max(...obstacles.map(o => o.x), 800) : 800;
+      lastObstacleX = customLevel || currentChallenge ? Math.max(...obstacles.map(o => o.x), 800) : 800;
       boosting = false;
       boostTimer = 0;
       gravity = gameGravity;
       powerUpsRef.current = [];
       lastObstaclePassedRef.current = 0;
+      replayFramesRef.current = [];
+      powerUpsCollectedRef.current = 0;
+      totalPowerUpsRef.current = 0;
       setScore(0);
       setGameOver(false);
       setCombo(0);
       setMultiplier(1);
       setActivePowerUp(null);
       setPowerUpTimer(0);
+      
+      // Load ghost data for best run
+      if (!currentChallenge && !customLevel) {
+        const storedBest = localStorage.getItem('best-ghost');
+        if (storedBest) {
+          ghostFramesRef.current = JSON.parse(storedBest);
+          bestScoreRef.current = parseInt(localStorage.getItem('best-score') || '0');
+        }
+      }
     };
 
     const jump = () => {
       if (playerY >= groundY - playerSize) {
         playerVelocity = jumpForce;
         isJumping = true;
+        if (isSoundEnabled) soundManager.jump();
       }
     };
 
@@ -519,6 +572,7 @@ export const GeometryGame = () => {
         ) {
           if (practiceMode && distance > lastCheckpoint) {
             setLastCheckpoint(distance);
+            if (isSoundEnabled) soundManager.checkpoint();
           }
         }
         return false;
@@ -646,7 +700,13 @@ export const GeometryGame = () => {
         if (obstacle.x + obstacle.width < playerX && obstacle.x + obstacle.width > lastObstaclePassedRef.current) {
           if (obstacle.type !== "checkpoint" && obstacle.type !== "platform") {
             lastObstaclePassedRef.current = obstacle.x + obstacle.width;
-            setCombo(prev => prev + 1);
+            setCombo(prev => {
+              const newCombo = prev + 1;
+              if (newCombo > 0 && newCombo % 5 === 0 && isSoundEnabled) {
+                soundManager.comboMilestone(Math.floor(newCombo / 5));
+              }
+              return newCombo;
+            });
             const newMultiplier = Math.min(Math.floor(combo / 5) + 1, 5);
             setMultiplier(newMultiplier);
           }
@@ -666,6 +726,7 @@ export const GeometryGame = () => {
           
           // Create explosion
           createParticles(playerX + playerSize / 2, playerY + playerSize / 2, 20, theme.spike, true);
+          if (isSoundEnabled) soundManager.collision();
           setCombo(0);
           setMultiplier(1);
           
@@ -699,10 +760,17 @@ export const GeometryGame = () => {
           playerY < powerUp.y + powerUp.height &&
           playerY + playerSize > powerUp.y
         ) {
+          // Check for no-shield challenge
+          if (currentChallenge?.noShield && powerUp.type === "shield") {
+            return; // Skip shield in no-shield challenge
+          }
+          
           setActivePowerUp(powerUp.type);
           setPowerUpTimer(300); // 5 seconds at 60fps
           powerUpsRef.current = powerUpsRef.current.filter(p => p !== powerUp);
           createParticles(powerUp.x + powerUp.width / 2, powerUp.y + powerUp.height / 2, 10, "hsl(60, 100%, 50%)", true);
+          powerUpsCollectedRef.current++;
+          if (isSoundEnabled) soundManager.powerUp();
           
           if (powerUp.type === "slow-motion") {
             scrollSpeed = 3 * gameSpeed;
@@ -712,7 +780,7 @@ export const GeometryGame = () => {
       });
 
       // Generate new obstacles continuously (only in random mode)
-      if (!customLevel) {
+      if (!customLevel && !currentChallenge) {
         const lastObstacle = obstacles[obstacles.length - 1];
         if (!lastObstacle || lastObstacle.x < canvas.width + 200) {
           const newObstacle = createObstacle();
@@ -722,19 +790,50 @@ export const GeometryGame = () => {
         
         // Spawn power-ups occasionally
         if (Math.random() < 0.01 && powerUpsRef.current.length < 2) {
-          powerUpsRef.current.push(createPowerUp());
+          const newPowerUp = createPowerUp();
+          powerUpsRef.current.push(newPowerUp);
+          totalPowerUpsRef.current++;
+        }
+      }
+      
+      // Count total power-ups in challenge mode
+      if (currentChallenge?.collectAllPowerUps && powerUpsRef.current.length < 5 && Math.random() < 0.02) {
+        const newPowerUp = createPowerUp();
+        powerUpsRef.current.push(newPowerUp);
+        totalPowerUpsRef.current++;
+      }
+
+      // Draw ghost player
+      if (showGhost && ghostFramesRef.current.length > 0) {
+        const frameIndex = Math.floor(distance / 0.6);
+        const ghostFrame = ghostFramesRef.current[frameIndex];
+        if (ghostFrame) {
+          ctx.save();
+          ctx.globalAlpha = 0.3;
+          ctx.fillStyle = theme.player;
+          ctx.fillRect(playerX, ghostFrame.playerY, playerSize, playerSize);
+          ctx.restore();
         }
       }
 
       // Draw player
       drawPlayer();
+      
+      // Record replay frame
+      replayFramesRef.current.push({
+        playerY,
+        playerVelocity,
+        distance,
+        score: Math.floor(distance * multiplier),
+        obstacles: obstacles.map(o => ({ ...o })),
+      });
 
       // Update score with multiplier
       distance += scrollSpeed * 0.1;
       setScore(Math.floor(distance * multiplier));
 
       // Gradually increase difficulty (only in random mode)
-      if (!customLevel && distance % 200 < scrollSpeed * 0.1 && scrollSpeed < 10 * gameSpeed) {
+      if (!customLevel && !currentChallenge && distance % 200 < scrollSpeed * 0.1 && scrollSpeed < 10 * gameSpeed) {
         scrollSpeed += 0.15 * gameSpeed;
       }
 
@@ -762,7 +861,7 @@ export const GeometryGame = () => {
         cancelAnimationFrame(gameLoopRef.current);
       }
     };
-  }, [gameStarted, gameOver, isMuted, gameSpeed, gameGravity, customLevel, practiceMode, lastCheckpoint]);
+  }, [gameStarted, gameOver, isMuted, gameSpeed, gameGravity, customLevel, practiceMode, lastCheckpoint, currentChallenge, showGhost, isSoundEnabled, currentTheme]);
 
   // Cache audio file
   useEffect(() => {
@@ -786,17 +885,63 @@ export const GeometryGame = () => {
     setLastCheckpoint(0);
     
     if (gameOver && !practiceMode) {
+      // Check challenge completion
+      let challengeCompleted = false;
+      if (currentChallenge) {
+        if (currentChallenge.collectAllPowerUps && powerUpsCollectedRef.current === totalPowerUpsRef.current && totalPowerUpsRef.current > 0) {
+          challengeCompleted = true;
+        } else if (currentChallenge.targetScore && score >= currentChallenge.targetScore) {
+          challengeCompleted = true;
+        }
+        
+        if (challengeCompleted) {
+          const today = new Date().toISOString().split('T')[0];
+          const storedChallenges = localStorage.getItem(`challenges-${today}`);
+          if (storedChallenges) {
+            const challenges = JSON.parse(storedChallenges);
+            const updated = challenges.map((c: Challenge) => 
+              c.id === currentChallenge.id ? { ...c, completed: true, bestScore: Math.max(c.bestScore || 0, score) } : c
+            );
+            localStorage.setItem(`challenges-${today}`, JSON.stringify(updated));
+          }
+        }
+      }
+      
+      // Save replay
+      const replay = {
+        id: Date.now().toString(),
+        date: new Date().toISOString(),
+        score,
+        frames: replayFramesRef.current,
+        type: score > bestScoreRef.current ? "best" : "failed",
+      };
+      
+      const storedReplays = localStorage.getItem('replays');
+      const replays = storedReplays ? JSON.parse(storedReplays) : [];
+      replays.unshift(replay);
+      localStorage.setItem('replays', JSON.stringify(replays.slice(0, 10)));
+      
+      // Save ghost if new best score
+      if (score > bestScoreRef.current && !currentChallenge && !customLevel) {
+        const ghostFrames = replayFramesRef.current.map(frame => ({
+          playerY: frame.playerY,
+          distance: frame.distance,
+        }));
+        localStorage.setItem('best-ghost', JSON.stringify(ghostFrames));
+        localStorage.setItem('best-score', score.toString());
+      }
+      
       // Save score to leaderboard
-      const playerName = prompt("Enter your name for the leaderboard:");
+      const playerName = prompt(challengeCompleted ? "Challenge completed! Enter your name:" : "Enter your name for the leaderboard:");
       if (playerName) {
         const entry: LeaderboardEntry = {
           name: playerName,
           score,
           date: new Date().toISOString(),
-          levelName: customLevel?.name,
+          levelName: customLevel?.name || currentChallenge?.name,
         };
         
-        const key = customLevel ? `leaderboard-${customLevel.name}` : 'leaderboard-random';
+        const key = customLevel ? `leaderboard-${customLevel.name}` : currentChallenge ? `leaderboard-${currentChallenge.id}` : 'leaderboard-random';
         const stored = localStorage.getItem(key);
         const leaderboard: LeaderboardEntry[] = stored ? JSON.parse(stored) : [];
         leaderboard.push(entry);
@@ -818,12 +963,34 @@ export const GeometryGame = () => {
     setShowEditor(false);
   };
 
+  const handleStartChallenge = (challenge: Challenge) => {
+    setCurrentChallenge(challenge);
+    setShowChallenges(false);
+  };
+
+  // Register service worker for offline support
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js')
+        .then(() => console.log('Service Worker registered'))
+        .catch(err => console.error('Service Worker registration failed:', err));
+    }
+  }, []);
+
   if (showEditor) {
     return <LevelEditor onBack={() => setShowEditor(false)} onLoadLevel={handleLoadLevel} />;
   }
 
   if (showLeaderboard) {
     return <Leaderboard onBack={() => setShowLeaderboard(false)} />;
+  }
+
+  if (showChallenges) {
+    return <DailyChallenges onBack={() => setShowChallenges(false)} onStartChallenge={handleStartChallenge} />;
+  }
+
+  if (showReplays) {
+    return <ReplayViewer onBack={() => setShowReplays(false)} />;
   }
 
   return (
@@ -924,6 +1091,35 @@ export const GeometryGame = () => {
         >
           Leaderboards
         </Button>
+        <Button
+          onClick={() => setShowChallenges(true)}
+          variant="outline"
+          className="border-accent text-accent hover:bg-accent hover:text-accent-foreground"
+        >
+          <Trophy className="h-4 w-4 mr-2" />
+          Daily Challenges
+        </Button>
+        <Button
+          onClick={() => setShowReplays(true)}
+          variant="outline"
+        >
+          <Film className="h-4 w-4 mr-2" />
+          Replays
+        </Button>
+        <Button
+          onClick={() => setShowGhost(!showGhost)}
+          variant="outline"
+          className={showGhost ? "border-primary text-primary" : ""}
+        >
+          Ghost: {showGhost ? "ON" : "OFF"}
+        </Button>
+        <Button
+          onClick={() => setIsSoundEnabled(!isSoundEnabled)}
+          variant="outline"
+          className={isSoundEnabled ? "border-primary text-primary" : ""}
+        >
+          SFX: {isSoundEnabled ? "ON" : "OFF"}
+        </Button>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Theme:</span>
           {Object.keys(THEMES).map((themeKey) => (
@@ -949,8 +1145,11 @@ export const GeometryGame = () => {
       )}
 
       <div className="mt-4 text-sm text-muted-foreground text-center">
-        Controls: SPACE or CLICK to jump {customLevel && `| Playing: ${customLevel.name}`}
+        Controls: SPACE or CLICK to jump 
+        {customLevel && ` | Playing: ${customLevel.name}`}
+        {currentChallenge && ` | Challenge: ${currentChallenge.name}`}
         {practiceMode && lastCheckpoint > 0 && ` | Last Checkpoint: ${Math.floor(lastCheckpoint)}`}
+        {showGhost && bestScoreRef.current > 0 && ` | Ghost Best: ${bestScoreRef.current}`}
       </div>
       
       {customLevel && (
@@ -961,6 +1160,17 @@ export const GeometryGame = () => {
           className="mt-2 border-accent text-accent hover:bg-accent hover:text-accent-foreground"
         >
           Back to Random Mode
+        </Button>
+      )}
+      
+      {currentChallenge && (
+        <Button
+          onClick={() => setCurrentChallenge(null)}
+          variant="outline"
+          size="sm"
+          className="mt-2 border-accent text-accent hover:bg-accent hover:text-accent-foreground"
+        >
+          Exit Challenge
         </Button>
       )}
     </div>
