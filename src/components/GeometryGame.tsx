@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Play, RotateCcw, Volume2, VolumeX, Settings, Edit, Shield, Zap, Clock, Film, Trophy } from "lucide-react";
+import { Play, RotateCcw, Volume2, VolumeX, Settings, Edit, Shield, Zap, Clock, Film, Trophy, Menu, Award, Users } from "lucide-react";
 import { LevelEditor } from "@/components/LevelEditor";
 import { GameControls } from "@/components/GameControls";
 import { Leaderboard } from "@/components/Leaderboard";
 import { DailyChallenges } from "@/components/DailyChallenges";
 import { ReplayViewer } from "@/components/ReplayViewer";
+import { Achievements } from "@/components/Achievements";
+import { LoadingScreen } from "@/components/LoadingScreen";
 import { soundManager } from "@/lib/sounds";
+import { updateGameStats } from "@/lib/achievements";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 interface Obstacle {
   x: number;
@@ -159,6 +163,11 @@ export const GeometryGame = () => {
   const [currentChallenge, setCurrentChallenge] = useState<Challenge | null>(null);
   const [isSoundEnabled, setIsSoundEnabled] = useState(true);
   const [showGhost, setShowGhost] = useState(true);
+  const [showAchievements, setShowAchievements] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard" | "expert">("medium");
+  const [multiplayerMode, setMultiplayerMode] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const gameLoopRef = useRef<number>();
   const starsRef = useRef<Array<{ x: number; y: number; size: number; speed: number }>>([]);
   const particlesRef = useRef<Particle[]>([]);
@@ -169,22 +178,47 @@ export const GeometryGame = () => {
   const bestScoreRef = useRef<number>(0);
   const powerUpsCollectedRef = useRef<number>(0);
   const totalPowerUpsRef = useRef<number>(0);
+  const jumpCountRef = useRef<number>(0);
+  const startTimeRef = useRef<number>(0);
+  
+  // Multiplayer refs
+  const player2YRef = useRef<number>(300);
+  const player2VelocityRef = useRef<number>(0);
+  const player2ScoreRef = useRef<number>(0);
+  const [player2Score, setPlayer2Score] = useState(0);
 
   // Initialize parallax stars
   useEffect(() => {
     if (starsRef.current.length === 0) {
       const stars = [];
+      const canvasWidth = multiplayerMode ? 1200 : 1200; // Larger canvas
       for (let i = 0; i < 100; i++) {
         stars.push({
-          x: Math.random() * 800,
-          y: Math.random() * 500,
+          x: Math.random() * canvasWidth,
+          y: Math.random() * 700,
           size: Math.random() * 2 + 0.5,
           speed: Math.random() * 0.5 + 0.1,
         });
       }
       starsRef.current = stars;
     }
-  }, []);
+  }, [multiplayerMode]);
+
+  // Difficulty settings
+  const getDifficultySettings = () => {
+    switch (difficulty) {
+      case "easy":
+        return { speedMultiplier: 0.7, spawnRate: 350, gravityMultiplier: 0.9 };
+      case "medium":
+        return { speedMultiplier: 1, spawnRate: 250, gravityMultiplier: 1 };
+      case "hard":
+        return { speedMultiplier: 1.3, spawnRate: 200, gravityMultiplier: 1.1 };
+      case "expert":
+        return { speedMultiplier: 1.6, spawnRate: 150, gravityMultiplier: 1.2 };
+      default:
+        return { speedMultiplier: 1, spawnRate: 250, gravityMultiplier: 1 };
+    }
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -194,40 +228,52 @@ export const GeometryGame = () => {
     if (!ctx) return;
 
     // Game state
-    let playerY = 300;
+    const diffSettings = getDifficultySettings();
+    let playerY = 350;
     let playerVelocity = 0;
     const playerSize = 30;
     const playerX = 100;
-    let gravity = gameGravity;
+    let gravity = gameGravity * diffSettings.gravityMultiplier;
     const jumpForce = -14;
     let isJumping = false;
-    let obstacles: Obstacle[] = customLevel ? [...customLevel.obstacles] : [];
-    let scrollSpeed = 6 * gameSpeed;
+    let obstacles: Obstacle[] = customLevel || currentChallenge ? [...(customLevel?.obstacles || currentChallenge?.obstacles || [])] : [];
+    let scrollSpeed = 6 * gameSpeed * diffSettings.speedMultiplier;
     let distance = 0;
-    let lastObstacleX = customLevel ? Math.max(...obstacles.map(o => o.x), 800) : 800;
+    let lastObstacleX = customLevel || currentChallenge ? Math.max(...obstacles.map(o => o.x), 1200) : 1200;
     let boosting = false;
     let boostTimer = 0;
+    
+    // Multiplayer state
+    let player2Y = 350;
+    let player2Velocity = 0;
+    let player2Jumping = false;
 
     // Ground level
-    const groundY = 400;
+    const groundY = 600;
 
     const resetGame = () => {
-      playerY = 300;
+      playerY = 350;
       playerVelocity = 0;
       isJumping = false;
+      player2Y = 350;
+      player2Velocity = 0;
+      player2Jumping = false;
       obstacles = customLevel || currentChallenge ? [...(customLevel?.obstacles || currentChallenge?.obstacles || [])] : [];
-      scrollSpeed = 6 * gameSpeed;
+      scrollSpeed = 6 * gameSpeed * diffSettings.speedMultiplier;
       distance = 0;
-      lastObstacleX = customLevel || currentChallenge ? Math.max(...obstacles.map(o => o.x), 800) : 800;
+      lastObstacleX = customLevel || currentChallenge ? Math.max(...obstacles.map(o => o.x), 1200) : 1200;
       boosting = false;
       boostTimer = 0;
-      gravity = gameGravity;
+      gravity = gameGravity * diffSettings.gravityMultiplier;
       powerUpsRef.current = [];
       lastObstaclePassedRef.current = 0;
       replayFramesRef.current = [];
       powerUpsCollectedRef.current = 0;
       totalPowerUpsRef.current = 0;
+      jumpCountRef.current = 0;
+      startTimeRef.current = Date.now();
       setScore(0);
+      setPlayer2Score(0);
       setGameOver(false);
       setCombo(0);
       setMultiplier(1);
@@ -248,14 +294,30 @@ export const GeometryGame = () => {
       if (playerY >= groundY - playerSize) {
         playerVelocity = jumpForce;
         isJumping = true;
+        jumpCountRef.current++;
+        if (isSoundEnabled) soundManager.jump();
+      }
+    };
+    
+    const jumpPlayer2 = () => {
+      if (player2Y >= groundY - playerSize) {
+        player2Velocity = jumpForce;
+        player2Jumping = true;
         if (isSoundEnabled) soundManager.jump();
       }
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space" && gameStarted && !gameOver) {
+      if (!gameStarted || gameOver) return;
+      
+      if (e.code === "Space") {
         e.preventDefault();
         jump();
+      }
+      
+      if (multiplayerMode && e.code === "KeyW") {
+        e.preventDefault();
+        jumpPlayer2();
       }
     };
 
@@ -311,7 +373,7 @@ export const GeometryGame = () => {
       
       const type = types[Math.floor(Math.random() * types.length)];
       
-      const spacing = 250 + Math.random() * 150;
+      const spacing = diffSettings.spawnRate + Math.random() * 150;
       
       switch (type) {
         case "spike":
@@ -861,7 +923,7 @@ export const GeometryGame = () => {
         cancelAnimationFrame(gameLoopRef.current);
       }
     };
-  }, [gameStarted, gameOver, isMuted, gameSpeed, gameGravity, customLevel, practiceMode, lastCheckpoint, currentChallenge, showGhost, isSoundEnabled, currentTheme]);
+  }, [gameStarted, gameOver, isMuted, gameSpeed, gameGravity, customLevel, practiceMode, lastCheckpoint, currentChallenge, showGhost, isSoundEnabled, currentTheme, difficulty, multiplayerMode]);
 
   // Cache audio file
   useEffect(() => {
@@ -908,6 +970,7 @@ export const GeometryGame = () => {
       }
       
       // Save replay
+      const elapsedTime = Math.floor((Date.now() - startTimeRef.current) / 1000);
       const replay = {
         id: Date.now().toString(),
         date: new Date().toISOString(),
@@ -922,7 +985,8 @@ export const GeometryGame = () => {
       localStorage.setItem('replays', JSON.stringify(replays.slice(0, 10)));
       
       // Save ghost if new best score
-      if (score > bestScoreRef.current && !currentChallenge && !customLevel) {
+      const beatGhost = score > bestScoreRef.current;
+      if (beatGhost && !currentChallenge && !customLevel) {
         const ghostFrames = replayFramesRef.current.map(frame => ({
           playerY: frame.playerY,
           distance: frame.distance,
@@ -930,6 +994,20 @@ export const GeometryGame = () => {
         localStorage.setItem('best-ghost', JSON.stringify(ghostFrames));
         localStorage.setItem('best-score', score.toString());
       }
+      
+      // Update achievements
+      updateGameStats({
+        totalJumps: jumpCountRef.current,
+        maxCombo: combo,
+        highScore: score,
+        longestRun: elapsedTime,
+        powerUpsCollected: powerUpsCollectedRef.current,
+        beatGhost: beatGhost,
+        checkpointsReached: practiceMode ? 1 : 0,
+        themesUsed: 1,
+        levelsCreated: false,
+        challengesCompleted: challengeCompleted,
+      });
       
       // Save score to leaderboard
       const playerName = prompt(challengeCompleted ? "Challenge completed! Enter your name:" : "Enter your name for the leaderboard:");
@@ -977,6 +1055,10 @@ export const GeometryGame = () => {
     }
   }, []);
 
+  if (isLoading) {
+    return <LoadingScreen onComplete={() => setIsLoading(false)} />;
+  }
+
   if (showEditor) {
     return <LevelEditor onBack={() => setShowEditor(false)} onLoadLevel={handleLoadLevel} />;
   }
@@ -993,186 +1075,251 @@ export const GeometryGame = () => {
     return <ReplayViewer onBack={() => setShowReplays(false)} />;
   }
 
+  if (showAchievements) {
+    return <Achievements onBack={() => setShowAchievements(false)} />;
+  }
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-game-bg-start to-game-bg-end p-4">
+    <div className="flex flex-col min-h-screen bg-gradient-to-b from-game-bg-start to-game-bg-end">
       <audio ref={audioRef} src="/game-music.mp3" loop />
       
-      <div className="relative">
-        <canvas
-          ref={canvasRef}
-          width={800}
-          height={500}
-          className="border-2 border-primary rounded-lg shadow-2xl shadow-primary/20"
-        />
+      {/* Top Bar */}
+      <div className="flex items-center justify-between p-4 border-b border-primary/20">
+        <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+          <SheetTrigger asChild>
+            <Button variant="outline" size="icon">
+              <Menu className="h-5 w-5" />
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="left" className="w-80">
+            <SheetHeader>
+              <SheetTitle>Game Menu</SheetTitle>
+            </SheetHeader>
+            <div className="flex flex-col gap-3 mt-6">
+              <Button onClick={() => { setShowEditor(true); setMenuOpen(false); }} variant="outline" className="justify-start">
+                <Edit className="mr-2 h-4 w-4" />
+                Level Editor
+              </Button>
+              <Button onClick={() => { setShowLeaderboard(true); setMenuOpen(false); }} variant="outline" className="justify-start">
+                <Trophy className="mr-2 h-4 w-4" />
+                Leaderboards
+              </Button>
+              <Button onClick={() => { setShowChallenges(true); setMenuOpen(false); }} variant="outline" className="justify-start">
+                <Trophy className="mr-2 h-4 w-4" />
+                Daily Challenges
+              </Button>
+              <Button onClick={() => { setShowReplays(true); setMenuOpen(false); }} variant="outline" className="justify-start">
+                <Film className="mr-2 h-4 w-4" />
+                Replays
+              </Button>
+              <Button onClick={() => { setShowAchievements(true); setMenuOpen(false); }} variant="outline" className="justify-start">
+                <Award className="mr-2 h-4 w-4" />
+                Achievements
+              </Button>
+              <Button onClick={() => setShowControls(!showControls)} variant="outline" className="justify-start">
+                <Settings className="mr-2 h-4 w-4" />
+                Game Controls
+              </Button>
+              
+              <div className="border-t border-border my-2" />
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Difficulty</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["easy", "medium", "hard", "expert"] as const).map((diff) => (
+                    <Button
+                      key={diff}
+                      onClick={() => setDifficulty(diff)}
+                      variant={difficulty === diff ? "default" : "outline"}
+                      size="sm"
+                      className="capitalize"
+                    >
+                      {diff}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Theme</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.keys(THEMES).map((themeKey) => (
+                    <Button
+                      key={themeKey}
+                      onClick={() => setCurrentTheme(themeKey)}
+                      variant={currentTheme === themeKey ? "default" : "outline"}
+                      size="sm"
+                    >
+                      {THEMES[themeKey].name}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="border-t border-border my-2" />
+              
+              <Button
+                onClick={() => setPracticeMode(!practiceMode)}
+                variant={practiceMode ? "default" : "outline"}
+                className="justify-start"
+              >
+                Practice Mode: {practiceMode ? "ON" : "OFF"}
+              </Button>
+              <Button
+                onClick={() => setMultiplayerMode(!multiplayerMode)}
+                variant={multiplayerMode ? "default" : "outline"}
+                className="justify-start"
+              >
+                <Users className="mr-2 h-4 w-4" />
+                Multiplayer: {multiplayerMode ? "ON" : "OFF"}
+              </Button>
+              <Button
+                onClick={() => setShowGhost(!showGhost)}
+                variant={showGhost ? "default" : "outline"}
+                className="justify-start"
+              >
+                Ghost: {showGhost ? "ON" : "OFF"}
+              </Button>
+              <Button
+                onClick={() => setIsSoundEnabled(!isSoundEnabled)}
+                variant={isSoundEnabled ? "default" : "outline"}
+                className="justify-start"
+              >
+                Sound Effects: {isSoundEnabled ? "ON" : "OFF"}
+              </Button>
+              <Button
+                onClick={toggleMute}
+                variant={!isMuted ? "default" : "outline"}
+                className="justify-start"
+              >
+                {isMuted ? <VolumeX className="mr-2 h-4 w-4" /> : <Volume2 className="mr-2 h-4 w-4" />}
+                Music: {isMuted ? "OFF" : "ON"}
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
         
-        {!gameStarted && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm rounded-lg">
-            <h1 className="text-5xl font-bold mb-4 text-primary drop-shadow-[0_0_20px_hsl(var(--primary))]">
-              GEOMETRY DASH
-            </h1>
-            <p className="text-xl mb-8 text-foreground">
-              {gameOver ? `Game Over! Score: ${score}` : "Press SPACE or CLICK to jump"}
-            </p>
-            <Button
-              onClick={startGame}
-              size="lg"
-              className="bg-primary hover:bg-primary/80 text-primary-foreground shadow-lg shadow-primary/50 hover:shadow-primary/70 transition-all"
-            >
-              {gameOver ? (
-                <>
-                  <RotateCcw className="mr-2 h-5 w-5" />
-                  Try Again
-                </>
-              ) : (
-                <>
-                  <Play className="mr-2 h-5 w-5" />
-                  Start Game
-                </>
-              )}
-            </Button>
+        <div className="flex-1 text-center">
+          <div className="text-3xl font-bold text-primary">
+            {multiplayerMode ? (
+              <>
+                <span className="text-foreground">P1: {score}</span>
+                <span className="mx-4">|</span>
+                <span className="text-foreground">P2: {player2Score}</span>
+              </>
+            ) : (
+              <>
+                Score: <span className="text-foreground">{score}</span>
+              </>
+            )}
+            {multiplier > 1 && <span className="text-accent ml-2">x{multiplier}</span>}
           </div>
-        )}
-      </div>
-
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
-        <div className="text-2xl font-bold text-primary">
-          Score: <span className="text-foreground">{score}</span>
-          {multiplier > 1 && <span className="text-accent ml-2">x{multiplier}</span>}
-          {practiceMode && <span className="text-sm text-muted-foreground ml-2">(Practice)</span>}
+          {combo > 0 && (
+            <div className="text-sm font-bold text-accent animate-pulse">
+              Combo: {combo}
+            </div>
+          )}
         </div>
-        {combo > 0 && (
-          <div className="text-lg font-bold text-accent animate-pulse">
-            Combo: {combo}
-          </div>
-        )}
-        {activePowerUp && (
-          <div className="flex items-center gap-2 px-3 py-1 bg-accent/20 rounded-full">
-            {activePowerUp === "shield" && <Shield className="h-4 w-4" />}
-            {activePowerUp === "slow-motion" && <Clock className="h-4 w-4" />}
-            {activePowerUp === "invincibility" && <Zap className="h-4 w-4" />}
-            <span className="text-sm font-bold capitalize">{activePowerUp}</span>
-            <span className="text-xs">({Math.ceil(powerUpTimer / 60)}s)</span>
-          </div>
-        )}
-        <Button
-          onClick={toggleMute}
-          variant="outline"
-          size="icon"
-          className="border-primary text-primary hover:bg-primary hover:text-primary-foreground"
-        >
-          {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-        </Button>
-        <Button
-          onClick={() => setShowControls(!showControls)}
-          variant="outline"
-          size="icon"
-          className="border-primary text-primary hover:bg-primary hover:text-primary-foreground"
-        >
-          <Settings className="h-5 w-5" />
-        </Button>
-        <Button
-          onClick={() => setShowEditor(true)}
-          variant="outline"
-          size="icon"
-          className="border-secondary text-secondary hover:bg-secondary hover:text-secondary-foreground"
-        >
-          <Edit className="h-5 w-5" />
-        </Button>
-        <Button
-          onClick={() => setPracticeMode(!practiceMode)}
-          variant="outline"
-          className={practiceMode ? "border-accent text-accent" : ""}
-        >
-          Practice Mode
-        </Button>
-        <Button
-          onClick={() => setShowLeaderboard(true)}
-          variant="outline"
-        >
-          Leaderboards
-        </Button>
-        <Button
-          onClick={() => setShowChallenges(true)}
-          variant="outline"
-          className="border-accent text-accent hover:bg-accent hover:text-accent-foreground"
-        >
-          <Trophy className="h-4 w-4 mr-2" />
-          Daily Challenges
-        </Button>
-        <Button
-          onClick={() => setShowReplays(true)}
-          variant="outline"
-        >
-          <Film className="h-4 w-4 mr-2" />
-          Replays
-        </Button>
-        <Button
-          onClick={() => setShowGhost(!showGhost)}
-          variant="outline"
-          className={showGhost ? "border-primary text-primary" : ""}
-        >
-          Ghost: {showGhost ? "ON" : "OFF"}
-        </Button>
-        <Button
-          onClick={() => setIsSoundEnabled(!isSoundEnabled)}
-          variant="outline"
-          className={isSoundEnabled ? "border-primary text-primary" : ""}
-        >
-          SFX: {isSoundEnabled ? "ON" : "OFF"}
-        </Button>
+        
         <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Theme:</span>
-          {Object.keys(THEMES).map((themeKey) => (
-            <Button
-              key={themeKey}
-              onClick={() => setCurrentTheme(themeKey)}
-              variant={currentTheme === themeKey ? "default" : "outline"}
-              size="sm"
-            >
-              {THEMES[themeKey].name}
-            </Button>
-          ))}
+          {activePowerUp && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-accent/20 rounded-full">
+              {activePowerUp === "shield" && <Shield className="h-4 w-4" />}
+              {activePowerUp === "slow-motion" && <Clock className="h-4 w-4" />}
+              {activePowerUp === "invincibility" && <Zap className="h-4 w-4" />}
+              <span className="text-xs">({Math.ceil(powerUpTimer / 60)}s)</span>
+            </div>
+          )}
+        </div>
+      </div>
+      
+      {/* Game Canvas */}
+      <div className="flex-1 flex items-center justify-center p-4">
+        <div className="relative">
+          <canvas
+            ref={canvasRef}
+            width={1200}
+            height={700}
+            className="border-2 border-primary rounded-lg shadow-2xl shadow-primary/20 max-w-full"
+          />
+          
+          {!gameStarted && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm rounded-lg">
+              <h1 className="text-6xl font-bold mb-4 text-primary drop-shadow-[0_0_20px_hsl(var(--primary))]">
+                GEOMETRY DASH
+              </h1>
+              <p className="text-2xl mb-2 text-foreground">
+                {gameOver ? `Game Over! Score: ${score}` : multiplayerMode ? "P1: SPACE | P2: W" : "Press SPACE or CLICK to jump"}
+              </p>
+              <p className="text-lg mb-8 text-muted-foreground">
+                Difficulty: {difficulty.toUpperCase()}
+                {customLevel && ` | Level: ${customLevel.name}`}
+                {currentChallenge && ` | Challenge: ${currentChallenge.name}`}
+              </p>
+              <Button
+                onClick={startGame}
+                size="lg"
+                className="bg-primary hover:bg-primary/80 text-primary-foreground shadow-lg shadow-primary/50 hover:shadow-primary/70 transition-all"
+              >
+                {gameOver ? (
+                  <>
+                    <RotateCcw className="mr-2 h-5 w-5" />
+                    Try Again
+                  </>
+                ) : (
+                  <>
+                    <Play className="mr-2 h-5 w-5" />
+                    Start Game
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
       {showControls && (
-        <GameControls
-          gameSpeed={gameSpeed}
-          gameGravity={gameGravity}
-          onSpeedChange={setGameSpeed}
-          onGravityChange={setGameGravity}
-        />
+        <div className="p-4 border-t border-primary/20">
+          <GameControls
+            gameSpeed={gameSpeed}
+            gameGravity={gameGravity}
+            onSpeedChange={setGameSpeed}
+            onGravityChange={setGameGravity}
+          />
+        </div>
       )}
-
-      <div className="mt-4 text-sm text-muted-foreground text-center">
-        Controls: SPACE or CLICK to jump 
-        {customLevel && ` | Playing: ${customLevel.name}`}
-        {currentChallenge && ` | Challenge: ${currentChallenge.name}`}
-        {practiceMode && lastCheckpoint > 0 && ` | Last Checkpoint: ${Math.floor(lastCheckpoint)}`}
-        {showGhost && bestScoreRef.current > 0 && ` | Ghost Best: ${bestScoreRef.current}`}
+      
+      {/* Status Bar */}
+      <div className="p-4 text-center text-sm text-muted-foreground border-t border-primary/20">
+        {practiceMode && lastCheckpoint > 0 && `Checkpoint: ${Math.floor(lastCheckpoint)} | `}
+        {showGhost && bestScoreRef.current > 0 && `Ghost Best: ${bestScoreRef.current} | `}
+        {customLevel && (
+          <>
+            <span>Playing: {customLevel.name}</span>
+            <Button
+              onClick={() => setCustomLevel(null)}
+              variant="link"
+              size="sm"
+              className="ml-2"
+            >
+              Exit
+            </Button>
+          </>
+        )}
+        {currentChallenge && (
+          <>
+            <span>Challenge: {currentChallenge.name}</span>
+            <Button
+              onClick={() => setCurrentChallenge(null)}
+              variant="link"
+              size="sm"
+              className="ml-2"
+            >
+              Exit
+            </Button>
+          </>
+        )}
       </div>
-      
-      {customLevel && (
-        <Button
-          onClick={() => setCustomLevel(null)}
-          variant="outline"
-          size="sm"
-          className="mt-2 border-accent text-accent hover:bg-accent hover:text-accent-foreground"
-        >
-          Back to Random Mode
-        </Button>
-      )}
-      
-      {currentChallenge && (
-        <Button
-          onClick={() => setCurrentChallenge(null)}
-          variant="outline"
-          size="sm"
-          className="mt-2 border-accent text-accent hover:bg-accent hover:text-accent-foreground"
-        >
-          Exit Challenge
-        </Button>
-      )}
     </div>
   );
 };
