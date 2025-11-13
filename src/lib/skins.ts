@@ -7,6 +7,8 @@ export interface Skin {
   unlockType: "achievement" | "purchase" | "default";
   achievementId?: string;
   cost?: number;
+  particleColor: string;
+  trailEffect: "standard" | "sparkle" | "fire" | "ice" | "electric" | "smoke" | "rainbow" | "cosmic";
   renderPlayer: (ctx: CanvasRenderingContext2D, x: number, y: number, size: number, theme: any) => void;
 }
 
@@ -18,6 +20,8 @@ export const SKINS: Skin[] = [
     icon: "🟦",
     unlockCondition: "Default",
     unlockType: "default",
+    particleColor: "hsl(180, 100%, 50%)",
+    trailEffect: "standard",
     renderPlayer: (ctx, x, y, size, theme) => {
       ctx.save();
       ctx.shadowColor = theme.playerGlow;
@@ -38,6 +42,8 @@ export const SKINS: Skin[] = [
     unlockCondition: "Complete 50 jumps",
     unlockType: "achievement",
     achievementId: "jump-master",
+    particleColor: "hsl(200, 100%, 70%)",
+    trailEffect: "sparkle",
     renderPlayer: (ctx, x, y, size, theme) => {
       ctx.save();
       ctx.shadowColor = theme.playerGlow;
@@ -60,6 +66,8 @@ export const SKINS: Skin[] = [
     unlockCondition: "Reach 20x combo",
     unlockType: "achievement",
     achievementId: "combo-king",
+    particleColor: "hsl(280, 100%, 70%)",
+    trailEffect: "sparkle",
     renderPlayer: (ctx, x, y, size, theme) => {
       ctx.save();
       ctx.shadowColor = theme.playerGlow;
@@ -86,6 +94,8 @@ export const SKINS: Skin[] = [
     unlockCondition: "Beat your ghost",
     unlockType: "achievement",
     achievementId: "ghost-buster",
+    particleColor: "hsl(60, 100%, 60%)",
+    trailEffect: "rainbow",
     renderPlayer: (ctx, x, y, size, theme) => {
       ctx.save();
       ctx.shadowColor = theme.playerGlow;
@@ -121,6 +131,8 @@ export const SKINS: Skin[] = [
     unlockCondition: "Purchase for 500 coins",
     unlockType: "purchase",
     cost: 500,
+    particleColor: "hsl(0, 100%, 60%)",
+    trailEffect: "fire",
     renderPlayer: (ctx, x, y, size, theme) => {
       ctx.save();
       ctx.shadowColor = theme.playerGlow;
@@ -146,6 +158,8 @@ export const SKINS: Skin[] = [
     unlockCondition: "Purchase for 1000 coins",
     unlockType: "purchase",
     cost: 1000,
+    particleColor: "hsl(160, 100%, 50%)",
+    trailEffect: "electric",
     renderPlayer: (ctx, x, y, size, theme) => {
       ctx.save();
       ctx.shadowColor = theme.playerGlow;
@@ -178,6 +192,8 @@ export const SKINS: Skin[] = [
     unlockCondition: "Reach score of 1000",
     unlockType: "achievement",
     achievementId: "score-1000",
+    particleColor: "hsl(30, 100%, 50%)",
+    trailEffect: "fire",
     renderPlayer: (ctx, x, y, size, theme) => {
       ctx.save();
       ctx.shadowColor = theme.playerGlow;
@@ -208,6 +224,8 @@ export const SKINS: Skin[] = [
     unlockCondition: "Win a tournament",
     unlockType: "achievement",
     achievementId: "tournament-winner",
+    particleColor: "hsl(50, 100%, 60%)",
+    trailEffect: "cosmic",
     renderPlayer: (ctx, x, y, size, theme) => {
       ctx.save();
       ctx.shadowColor = theme.playerGlow;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Play, RotateCcw, Volume2, VolumeX, Settings, Edit, Shield, Zap, Clock, Film, Trophy, Menu, Award, Users, Palette, Swords } from "lucide-react";
+import { Play, RotateCcw, Volume2, VolumeX, Settings, Edit, Shield, Zap, Clock, Film, Trophy, Menu, Award, Users, Palette, Swords, ShoppingBag } from "lucide-react";
 import { LevelEditor } from "@/components/LevelEditor";
 import { GameControls } from "@/components/GameControls";
 import { Leaderboard } from "@/components/Leaderboard";
@@ -10,9 +10,11 @@ import { Achievements } from "@/components/Achievements";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { Skins } from "@/components/Skins";
 import { Tournament } from "@/components/Tournament";
+import { Shop } from "@/components/Shop";
 import { soundManager } from "@/lib/sounds";
 import { updateGameStats } from "@/lib/achievements";
 import { SKINS, addCoins } from "@/lib/skins";
+import { getActiveUpgrades } from "@/lib/shop";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 interface Obstacle {
@@ -175,6 +177,9 @@ export const GeometryGame = () => {
   const [showTournament, setShowTournament] = useState(false);
   const [selectedSkin, setSelectedSkin] = useState(() => localStorage.getItem("selected-skin") || "classic");
   const [tournamentMatch, setTournamentMatch] = useState<any>(null);
+  const [showShop, setShowShop] = useState(false);
+  const [canDoubleJump, setCanDoubleJump] = useState(true);
+  const [canDash, setCanDash] = useState(true);
   const gameLoopRef = useRef<number>();
   const starsRef = useRef<Array<{ x: number; y: number; size: number; speed: number }>>([]);
   const particlesRef = useRef<Particle[]>([]);
@@ -303,6 +308,12 @@ export const GeometryGame = () => {
         isJumping = true;
         jumpCountRef.current++;
         if (isSoundEnabled) soundManager.jump();
+        setCanDoubleJump(true); // Reset double jump on ground
+      } else if (canDoubleJump && getActiveUpgrades().doubleJump) {
+        // Double jump
+        playerVelocity = jumpForce * 0.8;
+        setCanDoubleJump(false);
+        if (isSoundEnabled) soundManager.jump();
       }
     };
     
@@ -319,7 +330,25 @@ export const GeometryGame = () => {
       
       if (e.code === "Space") {
         e.preventDefault();
-        jump();
+        
+        const upgrades = getActiveUpgrades();
+        
+        // Glide ability
+        if (upgrades.glide && playerY < groundY - playerSize) {
+          playerVelocity = Math.min(playerVelocity, 2); // Slower fall
+        } else {
+          jump();
+        }
+      }
+      
+      // Dash ability
+      if (e.code === "KeyD" && canDash && getActiveUpgrades().dash) {
+        const dashSpeed = 20;
+        distance += dashSpeed;
+        createParticles(playerX + playerSize / 2, playerY + playerSize / 2, 15, SKINS.find(s => s.id === selectedSkin)?.particleColor || theme.player, true);
+        setCanDash(false);
+        setTimeout(() => setCanDash(true), 1000); // 1 second cooldown
+        if (isSoundEnabled) soundManager.jump();
       }
       
       if (multiplayerMode && e.code === "KeyW") {
@@ -444,14 +473,40 @@ export const GeometryGame = () => {
     };
 
     const drawPlayer = () => {
-      // Create trail particles
+      const currentSkinData = SKINS.find(s => s.id === selectedSkin) || SKINS[0];
+      
+      // Create skin-specific trail particles
       if (gameStarted && !gameOver) {
-        createParticles(
-          playerX + playerSize / 2,
-          playerY + playerSize / 2,
-          2,
-          boosting ? theme.playerGlow : theme.player
-        );
+        const particleColor = currentSkinData.particleColor;
+        
+        // Create different particle effects based on trail type
+        switch (currentSkinData.trailEffect) {
+          case "sparkle":
+            if (Math.random() < 0.3) {
+              createParticles(playerX + playerSize / 2, playerY + playerSize / 2, 1, particleColor, false);
+            }
+            break;
+          case "fire":
+            createParticles(playerX + playerSize / 2 - 5, playerY + playerSize, 3, particleColor, false);
+            break;
+          case "electric":
+            if (Math.random() < 0.5) {
+              createParticles(playerX + Math.random() * playerSize, playerY + Math.random() * playerSize, 1, particleColor, false);
+            }
+            break;
+          case "rainbow":
+            const rainbowColors = ["hsl(0, 100%, 50%)", "hsl(60, 100%, 50%)", "hsl(120, 100%, 50%)", "hsl(240, 100%, 50%)", "hsl(300, 100%, 50%)"];
+            createParticles(playerX + playerSize / 2, playerY + playerSize / 2, 1, rainbowColors[Math.floor(Math.random() * rainbowColors.length)], false);
+            break;
+          case "cosmic":
+            createParticles(playerX + playerSize / 2, playerY + playerSize / 2, 2, particleColor, false);
+            if (Math.random() < 0.1) {
+              createParticles(playerX + playerSize / 2, playerY + playerSize / 2, 5, "hsl(280, 100%, 70%)", true);
+            }
+            break;
+          default:
+            createParticles(playerX + playerSize / 2, playerY + playerSize / 2, 2, particleColor, false);
+        }
       }
 
       ctx.save();
@@ -477,7 +532,6 @@ export const GeometryGame = () => {
       }
       
       // Player rendering using selected skin
-      const currentSkinData = SKINS.find(s => s.id === selectedSkin) || SKINS[0];
       ctx.save();
       const tempCanvas = document.createElement('canvas');
       const tempCtx = tempCanvas.getContext('2d')!;
@@ -737,6 +791,7 @@ export const GeometryGame = () => {
       ctx.stroke();
 
       // Update power-up timer
+      const upgrades = getActiveUpgrades();
       if (powerUpTimer > 0) {
         setPowerUpTimer(powerUpTimer - 1);
         if (powerUpTimer === 1) {
@@ -814,8 +869,9 @@ export const GeometryGame = () => {
             setGameOver(true);
             setGameStarted(false);
             
-            // Award coins based on score
-            const coinsEarned = Math.floor(score / 10);
+            // Award coins based on score with upgrades
+            const baseCoins = Math.floor(score / 10);
+            const coinsEarned = Math.floor(baseCoins * upgrades.coinBoost);
             addCoins(coinsEarned);
             
             if (audioRef.current) {
@@ -832,6 +888,20 @@ export const GeometryGame = () => {
         powerUp.x -= scrollSpeed;
         drawPowerUp(powerUp);
 
+        // Magnet effect
+        const magnetRange = upgrades.magnetRange;
+        const distToPowerUp = Math.sqrt(
+          Math.pow(playerX + playerSize / 2 - (powerUp.x + powerUp.width / 2), 2) +
+          Math.pow(playerY + playerSize / 2 - (powerUp.y + powerUp.height / 2), 2)
+        );
+        
+        if (magnetRange > 0 && distToPowerUp < magnetRange) {
+          const dx = (playerX + playerSize / 2) - (powerUp.x + powerUp.width / 2);
+          const dy = (playerY + playerSize / 2) - (powerUp.y + powerUp.height / 2);
+          powerUp.x += dx * 0.1;
+          powerUp.y += dy * 0.1;
+        }
+
         // Check collision with power-up
         if (
           playerX < powerUp.x + powerUp.width &&
@@ -845,7 +915,14 @@ export const GeometryGame = () => {
           }
           
           setActivePowerUp(powerUp.type);
-          setPowerUpTimer(300); // 5 seconds at 60fps
+          
+          // Apply upgrades to power-up duration
+          let duration = 300; // base 5 seconds at 60fps
+          if (powerUp.type === "shield") duration *= upgrades.shieldDuration;
+          if (powerUp.type === "slow-motion") duration *= upgrades.slowmoBost;
+          if (powerUp.type === "invincibility") duration *= upgrades.invincibilityBoost;
+          
+          setPowerUpTimer(duration);
           powerUpsRef.current = powerUpsRef.current.filter(p => p !== powerUp);
           createParticles(powerUp.x + powerUp.width / 2, powerUp.y + powerUp.height / 2, 10, "hsl(60, 100%, 50%)", true);
           powerUpsCollectedRef.current++;
@@ -907,9 +984,9 @@ export const GeometryGame = () => {
         obstacles: obstacles.map(o => ({ ...o })),
       });
 
-      // Update score with multiplier
+      // Update score with multiplier and upgrades
       distance += scrollSpeed * 0.1;
-      setScore(Math.floor(distance * multiplier));
+      setScore(Math.floor(distance * multiplier * upgrades.scoreBoost));
 
       // Gradually increase difficulty (only in random mode)
       if (!customLevel && !currentChallenge && distance % 200 < scrollSpeed * 0.1 && scrollSpeed < 10 * gameSpeed) {
@@ -1104,6 +1181,10 @@ export const GeometryGame = () => {
     return <Achievements onBack={() => setShowAchievements(false)} />;
   }
 
+  if (showShop) {
+    return <Shop onBack={() => setShowShop(false)} />;
+  }
+
   if (showSkins) {
     return <Skins onBack={() => setShowSkins(false)} currentSkin={selectedSkin} onSelectSkin={setSelectedSkin} />;
   }
@@ -1152,6 +1233,10 @@ export const GeometryGame = () => {
               <Button onClick={() => { setShowAchievements(true); setMenuOpen(false); }} variant="outline" className="justify-start">
                 <Award className="mr-2 h-4 w-4" />
                 Achievements
+              </Button>
+              <Button onClick={() => { setShowShop(true); setMenuOpen(false); }} variant="outline" className="justify-start">
+                <ShoppingBag className="mr-2 h-4 w-4" />
+                Item Shop
               </Button>
               <Button onClick={() => { setShowSkins(true); setMenuOpen(false); }} variant="outline" className="justify-start">
                 <Palette className="mr-2 h-4 w-4" />
