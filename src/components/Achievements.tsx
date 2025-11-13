@@ -120,6 +120,13 @@ export const Achievements = ({ onBack }: AchievementsProps) => {
         icon: "📅",
         unlocked: stats.challengesCompleted || false,
       },
+      {
+        id: "tournament-winner",
+        name: "Tournament Champion",
+        description: "Win a tournament",
+        icon: "👑",
+        unlocked: stats.tournamentWins || false,
+      },
     ];
 
     setAchievements(allAchievements);

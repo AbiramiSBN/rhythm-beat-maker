@@ -33,6 +33,7 @@ const checkAchievements = (stats: Record<string, any>) => {
   if (stats.themesUsed >= 3) achievements.push("theme-master");
   if (stats.levelsCreated) achievements.push("level-creator");
   if (stats.challengesCompleted) achievements.push("challenge-complete");
+  if (stats.tournamentWins) achievements.push("tournament-winner");
   
   return achievements;
 };

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Play, RotateCcw, Volume2, VolumeX, Settings, Edit, Shield, Zap, Clock, Film, Trophy, Menu, Award, Users } from "lucide-react";
+import { Play, RotateCcw, Volume2, VolumeX, Settings, Edit, Shield, Zap, Clock, Film, Trophy, Menu, Award, Users, Palette, Swords } from "lucide-react";
 import { LevelEditor } from "@/components/LevelEditor";
 import { GameControls } from "@/components/GameControls";
 import { Leaderboard } from "@/components/Leaderboard";
@@ -8,8 +8,11 @@ import { DailyChallenges } from "@/components/DailyChallenges";
 import { ReplayViewer } from "@/components/ReplayViewer";
 import { Achievements } from "@/components/Achievements";
 import { LoadingScreen } from "@/components/LoadingScreen";
+import { Skins } from "@/components/Skins";
+import { Tournament } from "@/components/Tournament";
 import { soundManager } from "@/lib/sounds";
 import { updateGameStats } from "@/lib/achievements";
+import { SKINS, addCoins } from "@/lib/skins";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 interface Obstacle {
@@ -168,6 +171,10 @@ export const GeometryGame = () => {
   const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard" | "expert">("medium");
   const [multiplayerMode, setMultiplayerMode] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showSkins, setShowSkins] = useState(false);
+  const [showTournament, setShowTournament] = useState(false);
+  const [selectedSkin, setSelectedSkin] = useState(() => localStorage.getItem("selected-skin") || "classic");
+  const [tournamentMatch, setTournamentMatch] = useState<any>(null);
   const gameLoopRef = useRef<number>();
   const starsRef = useRef<Array<{ x: number; y: number; size: number; speed: number }>>([]);
   const particlesRef = useRef<Particle[]>([]);
@@ -469,14 +476,19 @@ export const GeometryGame = () => {
         ctx.globalAlpha = 0.7;
       }
       
-      // Player cube
-      ctx.fillStyle = boosting ? theme.playerGlow : theme.player;
-      ctx.fillRect(-playerSize / 2, -playerSize / 2, playerSize, playerSize);
+      // Player rendering using selected skin
+      const currentSkinData = SKINS.find(s => s.id === selectedSkin) || SKINS[0];
+      ctx.save();
+      const tempCanvas = document.createElement('canvas');
+      const tempCtx = tempCanvas.getContext('2d')!;
+      tempCanvas.width = playerSize;
+      tempCanvas.height = playerSize;
       
-      // Border
-      ctx.strokeStyle = boosting ? theme.playerGlow : theme.player;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(-playerSize / 2, -playerSize / 2, playerSize, playerSize);
+      currentSkinData.renderPlayer(tempCtx, 0, 0, playerSize, theme);
+      
+      ctx.globalAlpha = activePowerUp === "invincibility" ? 0.7 : 1;
+      ctx.drawImage(tempCanvas, -playerSize / 2, -playerSize / 2);
+      ctx.restore();
       
       ctx.restore();
     };
@@ -801,6 +813,11 @@ export const GeometryGame = () => {
           } else {
             setGameOver(true);
             setGameStarted(false);
+            
+            // Award coins based on score
+            const coinsEarned = Math.floor(score / 10);
+            addCoins(coinsEarned);
+            
             if (audioRef.current) {
               audioRef.current.pause();
               audioRef.current.currentTime = 0;
@@ -1009,6 +1026,14 @@ export const GeometryGame = () => {
         challengesCompleted: challengeCompleted,
       });
       
+      // Handle tournament match completion
+      if (tournamentMatch) {
+        localStorage.setItem('tournament-match-score', score.toString());
+        setShowTournament(true);
+        setTournamentMatch(null);
+        return; // Skip leaderboard prompt for tournament
+      }
+      
       // Save score to leaderboard
       const playerName = prompt(challengeCompleted ? "Challenge completed! Enter your name:" : "Enter your name for the leaderboard:");
       if (playerName) {
@@ -1079,6 +1104,18 @@ export const GeometryGame = () => {
     return <Achievements onBack={() => setShowAchievements(false)} />;
   }
 
+  if (showSkins) {
+    return <Skins onBack={() => setShowSkins(false)} currentSkin={selectedSkin} onSelectSkin={setSelectedSkin} />;
+  }
+
+  if (showTournament) {
+    return <Tournament onBack={() => setShowTournament(false)} onStartMatch={(match) => {
+      setTournamentMatch(match);
+      setShowTournament(false);
+      startGame();
+    }} currentScore={score} />;
+  }
+
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-b from-game-bg-start to-game-bg-end">
       <audio ref={audioRef} src="/game-music.mp3" loop />
@@ -1115,6 +1152,14 @@ export const GeometryGame = () => {
               <Button onClick={() => { setShowAchievements(true); setMenuOpen(false); }} variant="outline" className="justify-start">
                 <Award className="mr-2 h-4 w-4" />
                 Achievements
+              </Button>
+              <Button onClick={() => { setShowSkins(true); setMenuOpen(false); }} variant="outline" className="justify-start">
+                <Palette className="mr-2 h-4 w-4" />
+                Character Skins
+              </Button>
+              <Button onClick={() => { setShowTournament(true); setMenuOpen(false); }} variant="outline" className="justify-start">
+                <Swords className="mr-2 h-4 w-4" />
+                Tournament Mode
               </Button>
               <Button onClick={() => setShowControls(!showControls)} variant="outline" className="justify-start">
                 <Settings className="mr-2 h-4 w-4" />
