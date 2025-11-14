@@ -16,7 +16,20 @@ export interface Boss {
   rewards: {
     coins: number;
     items: string[];
+    powerUpDrops: ("shield" | "slow-motion" | "invincibility" | "mega-boost")[];
   };
+}
+
+export interface BossReward {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  type: "boss-badge" | "boss-skin" | "boss-weapon" | "mega-coin" | "rare-powerup";
+  itemId: string;
+  collected: boolean;
+  floatOffset: number;
+  glowIntensity: number;
 }
 
 export interface BossAttack {
@@ -44,6 +57,7 @@ export const BOSSES: Omit<Boss, "x" | "y" | "attackCooldown">[] = [
     rewards: {
       coins: 500,
       items: ["boss-1-badge", "boss-1-skin"],
+      powerUpDrops: ["shield", "slow-motion"],
     },
   },
   {
@@ -65,6 +79,7 @@ export const BOSSES: Omit<Boss, "x" | "y" | "attackCooldown">[] = [
     rewards: {
       coins: 1000,
       items: ["boss-2-badge", "boss-2-skin"],
+      powerUpDrops: ["shield", "invincibility", "mega-boost"],
     },
   },
   {
@@ -87,6 +102,7 @@ export const BOSSES: Omit<Boss, "x" | "y" | "attackCooldown">[] = [
     rewards: {
       coins: 2500,
       items: ["boss-3-badge", "boss-3-skin", "ultimate-weapon"],
+      powerUpDrops: ["shield", "slow-motion", "invincibility", "mega-boost"],
     },
   },
 ];
@@ -122,4 +138,20 @@ export const markBossDefeated = (bossId: string) => {
 
 export const resetBosses = () => {
   localStorage.removeItem("defeated-bosses");
+};
+
+export const unlockBossReward = (itemId: string) => {
+  const rewards = getBossRewards();
+  if (!rewards.includes(itemId)) {
+    rewards.push(itemId);
+    localStorage.setItem("boss-rewards", JSON.stringify(rewards));
+  }
+};
+
+export const getBossRewards = (): string[] => {
+  return JSON.parse(localStorage.getItem("boss-rewards") || "[]");
+};
+
+export const hasBossReward = (itemId: string): boolean => {
+  return getBossRewards().includes(itemId);
 };

@@ -17,8 +17,10 @@ import { updateGameStats } from "@/lib/achievements";
 import { SKINS, addCoins } from "@/lib/skins";
 import { getActiveUpgrades, hasAbility } from "@/lib/shop";
 import { getPrestigeBonuses, getHighestScore } from "@/lib/prestige";
-import { getBossForScore, markBossDefeated, Boss } from "@/lib/bosses";
+import { getBossForScore, markBossDefeated, Boss, BossReward, unlockBossReward } from "@/lib/bosses";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { toast } from "sonner";
+import { Toaster } from "@/components/ui/sonner";
 
 interface Obstacle {
   x: number;
@@ -83,7 +85,7 @@ interface PowerUp {
   y: number;
   width: number;
   height: number;
-  type: "shield" | "slow-motion" | "invincibility";
+  type: "shield" | "slow-motion" | "invincibility" | "mega-boost";
 }
 
 interface Projectile {
@@ -215,6 +217,7 @@ export const GeometryGame = () => {
   const powerUpsRef = useRef<PowerUp[]>([]);
   const projectilesRef = useRef<Projectile[]>([]);
   const bossProjectilesRef = useRef<BossProjectile[]>([]);
+  const bossRewardsRef = useRef<BossReward[]>([]);
   const lastObstaclePassedRef = useRef<number>(0);
   const replayFramesRef = useRef<ReplayFrame[]>([]);
   const ghostFramesRef = useRef<GhostFrame[]>([]);
@@ -309,6 +312,7 @@ export const GeometryGame = () => {
       boostTimer = 0;
       gravity = gameGravity * diffSettings.gravityMultiplier;
       powerUpsRef.current = [];
+      bossRewardsRef.current = [];
       lastObstaclePassedRef.current = 0;
       replayFramesRef.current = [];
       powerUpsCollectedRef.current = 0;
@@ -619,11 +623,12 @@ export const GeometryGame = () => {
         shield: "hsl(200, 100%, 60%)",
         "slow-motion": "hsl(280, 100%, 60%)",
         invincibility: "hsl(50, 100%, 60%)",
+        "mega-boost": "hsl(300, 100%, 60%)",
       };
       
-      ctx.shadowColor = colors[powerUp.type];
+      ctx.shadowColor = colors[powerUp.type] || colors.shield;
       ctx.shadowBlur = 20;
-      ctx.fillStyle = colors[powerUp.type];
+      ctx.fillStyle = colors[powerUp.type] || colors.shield;
       ctx.beginPath();
       ctx.arc(powerUp.x + powerUp.width / 2, powerUp.y + powerUp.height / 2, powerUp.width / 2, 0, Math.PI * 2);
       ctx.fill();
@@ -635,8 +640,84 @@ export const GeometryGame = () => {
       ctx.fillStyle = "white";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const icons = { shield: "🛡️", "slow-motion": "⏱️", invincibility: "✨" };
-      ctx.fillText(icons[powerUp.type], powerUp.x + powerUp.width / 2, powerUp.y + powerUp.height / 2);
+      const icons = { shield: "🛡️", "slow-motion": "⏱️", invincibility: "✨", "mega-boost": "⚡" };
+      ctx.fillText(icons[powerUp.type] || "?", powerUp.x + powerUp.width / 2, powerUp.y + powerUp.height / 2);
+      
+      ctx.restore();
+    };
+
+    const drawBossReward = (reward: BossReward) => {
+      ctx.save();
+      
+      // Floating animation
+      const floatY = reward.y + Math.sin(reward.floatOffset) * 10;
+      
+      // Outer glow
+      const gradient = ctx.createRadialGradient(
+        reward.x + reward.width / 2, floatY + reward.height / 2, 0,
+        reward.x + reward.width / 2, floatY + reward.height / 2, reward.width
+      );
+      
+      const typeColors = {
+        "boss-badge": "hsl(45, 100%, 50%)",
+        "boss-skin": "hsl(280, 100%, 60%)",
+        "boss-weapon": "hsl(0, 100%, 50%)",
+        "mega-coin": "hsl(50, 100%, 50%)",
+        "rare-powerup": "hsl(180, 100%, 50%)",
+      };
+      
+      const color = typeColors[reward.type];
+      gradient.addColorStop(0, color);
+      gradient.addColorStop(0.5, color.replace(")", ", 0.5)").replace("hsl", "hsla"));
+      gradient.addColorStop(1, "hsla(0, 0%, 0%, 0)");
+      
+      ctx.fillStyle = gradient;
+      ctx.fillRect(reward.x - 10, floatY - 10, reward.width + 20, reward.height + 20);
+      
+      // Main reward shape
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 20 + reward.glowIntensity * 10;
+      ctx.fillStyle = color;
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 3;
+      
+      // Draw star shape for rewards
+      ctx.beginPath();
+      const centerX = reward.x + reward.width / 2;
+      const centerY = floatY + reward.height / 2;
+      const spikes = 5;
+      const outerRadius = reward.width / 2;
+      const innerRadius = outerRadius * 0.5;
+      
+      for (let i = 0; i < spikes * 2; i++) {
+        const radius = i % 2 === 0 ? outerRadius : innerRadius;
+        const angle = (Math.PI * i) / spikes;
+        const x = centerX + Math.cos(angle) * radius;
+        const y = centerY + Math.sin(angle) * radius;
+        
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      
+      // Icon
+      ctx.font = "20px Arial";
+      ctx.fillStyle = "white";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const icons = {
+        "boss-badge": "🏆",
+        "boss-skin": "👑",
+        "boss-weapon": "⚔️",
+        "mega-coin": "💰",
+        "rare-powerup": "✨",
+      };
+      ctx.fillText(icons[reward.type] || "?", centerX, centerY);
       
       ctx.restore();
     };
@@ -978,10 +1059,49 @@ export const GeometryGame = () => {
             createParticles(projectile.x, projectile.y, 15, currentBoss.color, true);
             
             if (currentBoss.health <= 0) {
-              // Boss defeated
+              // Boss defeated - spawn rewards!
               markBossDefeated(currentBoss.id);
               const coinsEarned = Math.floor(currentBoss.rewards.coins * prestigeBonuses.coinMultiplier);
               addCoins(coinsEarned);
+              
+              // Spawn power-up drops
+              currentBoss.rewards.powerUpDrops.forEach((powerUpType, index) => {
+                powerUpsRef.current.push({
+                  x: currentBoss.x + (index * 50),
+                  y: currentBoss.y + currentBoss.height / 2,
+                  width: 30,
+                  height: 30,
+                  type: powerUpType as any,
+                });
+              });
+              
+              // Spawn boss rewards (badges, skins, etc)
+              currentBoss.rewards.items.forEach((itemId, index) => {
+                const rewardType = itemId.includes("badge") ? "boss-badge" : 
+                                   itemId.includes("skin") ? "boss-skin" : 
+                                   itemId.includes("weapon") ? "boss-weapon" : "rare-powerup";
+                
+                bossRewardsRef.current.push({
+                  x: currentBoss.x + currentBoss.width / 2 - 20 + (index * 60),
+                  y: currentBoss.y - 50,
+                  width: 40,
+                  height: 40,
+                  type: rewardType,
+                  itemId: itemId,
+                  collected: false,
+                  floatOffset: Math.random() * Math.PI * 2,
+                  glowIntensity: 1,
+                });
+              });
+              
+              // Victory particles
+              createParticles(currentBoss.x + currentBoss.width / 2, currentBoss.y + currentBoss.height / 2, 50, currentBoss.color, true);
+              
+              toast.success(`${currentBoss.name} Defeated!`, {
+                description: `Earned ${coinsEarned} coins and special rewards!`,
+                duration: 5000,
+              });
+              
               setCurrentBoss(null);
               if (isSoundEnabled) soundManager.powerUp();
             }
@@ -1148,6 +1268,7 @@ export const GeometryGame = () => {
           if (powerUp.type === "shield") duration *= upgrades.shieldDuration;
           if (powerUp.type === "slow-motion") duration *= upgrades.slowmoBost;
           if (powerUp.type === "invincibility") duration *= upgrades.invincibilityBoost;
+          if (powerUp.type === "mega-boost") duration = 600; // 10 seconds for mega-boost
           
           setPowerUpTimer(duration);
           powerUpsRef.current = powerUpsRef.current.filter(p => p !== powerUp);
@@ -1159,6 +1280,59 @@ export const GeometryGame = () => {
             scrollSpeed = 3 * gameSpeed;
             if (audioRef.current) audioRef.current.playbackRate = gameSpeed * 0.5;
           }
+          
+          if (powerUp.type === "mega-boost") {
+            // Mega boost gives invincibility + speed boost
+            scrollSpeed = 10 * gameSpeed;
+            setMultiplier(multiplier * 2);
+          }
+        }
+      });
+
+      // Update boss rewards
+      bossRewardsRef.current = bossRewardsRef.current.filter((reward) => !reward.collected && reward.x > -100);
+      bossRewardsRef.current.forEach((reward) => {
+        reward.x -= scrollSpeed * 0.5; // Move slower than obstacles
+        reward.floatOffset += 0.05; // Animate floating
+        reward.glowIntensity = 0.5 + Math.sin(reward.floatOffset) * 0.5; // Pulse glow
+        drawBossReward(reward);
+
+        // Check collision with player
+        if (
+          !reward.collected &&
+          playerX < reward.x + reward.width &&
+          playerX + playerSize > reward.x &&
+          playerY < reward.y + reward.height &&
+          playerY + playerSize > reward.y
+        ) {
+          reward.collected = true;
+          unlockBossReward(reward.itemId);
+          
+          // Award bonus coins for mega-coin
+          if (reward.type === "mega-coin") {
+            const megaCoinBonus = Math.floor(1000 * prestigeBonuses.coinMultiplier);
+            addCoins(megaCoinBonus);
+            toast.success("Mega Coin!", {
+              description: `+${megaCoinBonus} coins!`,
+            });
+          } else {
+            // Show reward notification
+            const rewardNames = {
+              "boss-badge": "Boss Badge",
+              "boss-skin": "Exclusive Skin",
+              "boss-weapon": "Legendary Weapon",
+              "rare-powerup": "Rare Power-Up",
+            };
+            
+            toast.success("Boss Reward Unlocked!", {
+              description: `${rewardNames[reward.type]}: ${reward.itemId}`,
+              duration: 5000,
+            });
+          }
+          
+          // Epic particle effect
+          createParticles(reward.x + reward.width / 2, reward.y + reward.height / 2, 30, "hsl(45, 100%, 50%)", true);
+          if (isSoundEnabled) soundManager.powerUp();
         }
       });
 
@@ -1430,6 +1604,7 @@ export const GeometryGame = () => {
 
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-b from-game-bg-start to-game-bg-end">
+      <Toaster />
       <audio ref={audioRef} src="/game-music.mp3" loop />
       
       {/* Top Bar */}
