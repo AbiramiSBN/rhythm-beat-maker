@@ -249,6 +249,96 @@ export const SKINS: Skin[] = [
       ctx.stroke();
       ctx.restore();
     }
+  },
+  // Boss-exclusive skins
+  {
+    id: "boss-1-skin",
+    name: "Tyrant Cube",
+    description: "Legendary skin from defeating the Cube Tyrant",
+    icon: "👑",
+    unlockCondition: "Defeat the Cube Tyrant boss",
+    unlockType: "achievement",
+    achievementId: "boss-1-defeated",
+    particleColor: "hsl(0, 100%, 50%)",
+    trailEffect: "fire",
+    renderPlayer: (ctx, x, y, size, theme) => {
+      ctx.save();
+      ctx.shadowColor = "hsl(0, 100%, 50%)";
+      ctx.shadowBlur = 30;
+      ctx.fillStyle = "hsl(0, 100%, 50%)";
+      ctx.fillRect(x, y, size, size);
+      ctx.strokeStyle = "hsl(45, 100%, 50%)";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, size, size);
+      // Crown on top
+      ctx.fillStyle = "hsl(45, 100%, 50%)";
+      ctx.fillRect(x + size * 0.2, y - size * 0.3, size * 0.2, size * 0.3);
+      ctx.fillRect(x + size * 0.6, y - size * 0.3, size * 0.2, size * 0.3);
+      ctx.restore();
+    }
+  },
+  {
+    id: "boss-2-skin",
+    name: "Spike Lord",
+    description: "Rare skin from defeating the Spike Lord",
+    icon: "⚡",
+    unlockCondition: "Defeat the Spike Lord boss",
+    unlockType: "achievement",
+    achievementId: "boss-2-defeated",
+    particleColor: "hsl(280, 100%, 50%)",
+    trailEffect: "electric",
+    renderPlayer: (ctx, x, y, size, theme) => {
+      ctx.save();
+      ctx.shadowColor = "hsl(280, 100%, 50%)";
+      ctx.shadowBlur = 30;
+      ctx.fillStyle = "hsl(280, 100%, 50%)";
+      // Spiky shape
+      ctx.beginPath();
+      ctx.moveTo(x + size/2, y);
+      ctx.lineTo(x + size * 0.7, y + size * 0.3);
+      ctx.lineTo(x + size, y + size/2);
+      ctx.lineTo(x + size * 0.7, y + size * 0.7);
+      ctx.lineTo(x + size/2, y + size);
+      ctx.lineTo(x + size * 0.3, y + size * 0.7);
+      ctx.lineTo(x, y + size/2);
+      ctx.lineTo(x + size * 0.3, y + size * 0.3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    }
+  },
+  {
+    id: "boss-3-skin",
+    name: "Geometry Master",
+    description: "Ultimate skin from defeating the Geometry Master",
+    icon: "🌟",
+    unlockCondition: "Defeat the Geometry Master boss",
+    unlockType: "achievement",
+    achievementId: "boss-3-defeated",
+    particleColor: "hsl(180, 100%, 50%)",
+    trailEffect: "cosmic",
+    renderPlayer: (ctx, x, y, size, theme) => {
+      ctx.save();
+      ctx.shadowColor = "hsl(180, 100%, 50%)";
+      ctx.shadowBlur = 40;
+      
+      // Rotating cosmic cube
+      const gradient = ctx.createLinearGradient(x, y, x + size, y + size);
+      gradient.addColorStop(0, "hsl(180, 100%, 50%)");
+      gradient.addColorStop(0.5, "hsl(280, 100%, 50%)");
+      gradient.addColorStop(1, "hsl(60, 100%, 50%)");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x, y, size, size);
+      
+      // Inner glow
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x + size * 0.1, y + size * 0.1, size * 0.8, size * 0.8);
+      ctx.restore();
+    }
   }
 ];
 
@@ -256,6 +346,12 @@ export const isSkinUnlocked = (skin: Skin): boolean => {
   if (skin.unlockType === "default") return true;
   
   if (skin.unlockType === "achievement") {
+    // Check for boss defeats
+    if (skin.achievementId?.startsWith("boss-")) {
+      const bossRewards = JSON.parse(localStorage.getItem("boss-rewards") || "[]");
+      return bossRewards.includes(skin.id);
+    }
+    
     const stats = JSON.parse(localStorage.getItem("game-stats") || "{}");
     
     switch (skin.achievementId) {
