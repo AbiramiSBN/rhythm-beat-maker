@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Play, RotateCcw, Volume2, VolumeX, Settings, Edit, Shield, Zap, Clock, Film, Trophy, Menu, Award, Users, Palette, Swords, ShoppingBag } from "lucide-react";
+import { Play, RotateCcw, Volume2, VolumeX, Settings, Edit, Shield, Zap, Clock, Film, Trophy, Menu, Award, Users, Palette, Swords, ShoppingBag, Crown, Target } from "lucide-react";
 import { LevelEditor } from "@/components/LevelEditor";
 import { GameControls } from "@/components/GameControls";
 import { Leaderboard } from "@/components/Leaderboard";
@@ -11,10 +11,13 @@ import { LoadingScreen } from "@/components/LoadingScreen";
 import { Skins } from "@/components/Skins";
 import { Tournament } from "@/components/Tournament";
 import { Shop } from "@/components/Shop";
+import { Prestige } from "@/components/Prestige";
 import { soundManager } from "@/lib/sounds";
 import { updateGameStats } from "@/lib/achievements";
 import { SKINS, addCoins } from "@/lib/skins";
-import { getActiveUpgrades } from "@/lib/shop";
+import { getActiveUpgrades, hasAbility } from "@/lib/shop";
+import { getPrestigeBonuses, getHighestScore } from "@/lib/prestige";
+import { getBossForScore, markBossDefeated, Boss } from "@/components/BossBattle";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 interface Obstacle {
@@ -81,6 +84,26 @@ interface PowerUp {
   width: number;
   height: number;
   type: "shield" | "slow-motion" | "invincibility";
+}
+
+interface Projectile {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  velocity: number;
+  piercing: boolean;
+  explosive: boolean;
+  hitCount: number;
+}
+
+interface BossProjectile {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  width: number;
+  height: number;
 }
 
 interface Theme {
@@ -180,10 +203,18 @@ export const GeometryGame = () => {
   const [showShop, setShowShop] = useState(false);
   const [canDoubleJump, setCanDoubleJump] = useState(true);
   const [canDash, setCanDash] = useState(true);
+  const [showPrestige, setShowPrestige] = useState(false);
+  const [shootCooldown, setShootCooldown] = useState(0);
+  const [currentBoss, setCurrentBoss] = useState<Boss | null>(null);
+  const [bossHealth, setBossHealth] = useState(0);
+  const [cheatMode, setCheatMode] = useState(false);
+  const [cheatKeys, setCheatKeys] = useState<string[]>([]);
   const gameLoopRef = useRef<number>();
   const starsRef = useRef<Array<{ x: number; y: number; size: number; speed: number }>>([]);
   const particlesRef = useRef<Particle[]>([]);
   const powerUpsRef = useRef<PowerUp[]>([]);
+  const projectilesRef = useRef<Projectile[]>([]);
+  const bossProjectilesRef = useRef<BossProjectile[]>([]);
   const lastObstaclePassedRef = useRef<number>(0);
   const replayFramesRef = useRef<ReplayFrame[]>([]);
   const ghostFramesRef = useRef<GhostFrame[]>([]);
@@ -351,9 +382,43 @@ export const GeometryGame = () => {
         if (isSoundEnabled) soundManager.jump();
       }
       
+      // Shoot projectile
+      if (e.code === "KeyF" && hasAbility("basic-weapon") && shootCooldown === 0) {
+        const upgrades = getActiveUpgrades();
+        const cooldown = upgrades.rapidFire ? 15 : 30;
+        
+        projectilesRef.current.push({
+          x: playerX + playerSize,
+          y: playerY + playerSize / 2,
+          width: 10,
+          height: 4,
+          velocity: 15,
+          piercing: upgrades.piercingShots || false,
+          explosive: upgrades.explosiveRounds || false,
+          hitCount: 0,
+        });
+        
+        setShootCooldown(cooldown);
+        if (isSoundEnabled) soundManager.jump();
+      }
+      
       if (multiplayerMode && e.code === "KeyW") {
         e.preventDefault();
         jumpPlayer2();
+      }
+      
+      // Cheat mode detection (Ctrl + 6 + 7)
+      if (e.ctrlKey) {
+        const newKeys = [...cheatKeys, e.key];
+        setCheatKeys(newKeys);
+        
+        if (newKeys.slice(-2).join('') === '67') {
+          setCheatMode(!cheatMode);
+          setCheatKeys([]);
+        }
+        
+        // Clear keys after 2 seconds
+        setTimeout(() => setCheatKeys([]), 2000);
       }
     };
 
@@ -790,6 +855,168 @@ export const GeometryGame = () => {
       ctx.lineTo(canvas.width, groundY);
       ctx.stroke();
 
+      // Update shoot cooldown
+      if (shootCooldown > 0) {
+        setShootCooldown(shootCooldown - 1);
+      }
+      
+      // Check for boss spawn
+      const prestigeBonuses = getPrestigeBonuses();
+      const adjustedScore = Math.floor(score * prestigeBonuses.scoreMultiplier);
+      
+      if (!currentBoss && !customLevel && !currentChallenge) {
+        const boss = getBossForScore(adjustedScore);
+        if (boss) {
+          setCurrentBoss(boss);
+          setBossHealth(boss.health);
+        }
+      }
+      
+      // Update boss
+      if (currentBoss && !customLevel && !currentChallenge) {
+        // Boss attacks
+        if (currentBoss.attackCooldown <= 0) {
+          const attack = currentBoss.attacks[Math.floor(Math.random() * currentBoss.attacks.length)];
+          
+          switch (attack.type) {
+            case "projectile":
+              // Shoot at player
+              const angle = Math.atan2(playerY - currentBoss.y, playerX - currentBoss.x);
+              bossProjectilesRef.current.push({
+                x: currentBoss.x,
+                y: currentBoss.y,
+                vx: Math.cos(angle) * 8,
+                vy: Math.sin(angle) * 8,
+                width: 20,
+                height: 20,
+              });
+              break;
+            case "ground-slam":
+              // Create shockwave obstacles
+              for (let i = 0; i < 3; i++) {
+                obstacles.push({
+                  x: lastObstacleX + i * 200,
+                  y: groundY,
+                  width: 40,
+                  height: 60,
+                  type: "spike",
+                });
+              }
+              lastObstacleX += 600;
+              break;
+            case "laser":
+              // Create laser beam (very tall spike)
+              obstacles.push({
+                x: lastObstacleX,
+                y: groundY,
+                width: 10,
+                height: 400,
+                type: "spike",
+              });
+              lastObstacleX += 300;
+              break;
+          }
+          
+          currentBoss.attackCooldown = attack.cooldown;
+        } else {
+          currentBoss.attackCooldown--;
+        }
+        
+        // Move boss up and down
+        currentBoss.y = 400 + Math.sin(distance * 0.02) * 100;
+      }
+      
+      // Update projectiles
+      projectilesRef.current = projectilesRef.current.filter((projectile) => {
+        projectile.x += projectile.velocity;
+        
+        // Check collision with obstacles
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+          const obstacle = obstacles[i];
+          if (
+            projectile.x + projectile.width > obstacle.x &&
+            projectile.x < obstacle.x + obstacle.width &&
+            projectile.y + projectile.height > obstacle.y - obstacle.height &&
+            projectile.y < obstacle.y + obstacle.height
+          ) {
+            // Hit obstacle
+            if (projectile.explosive) {
+              // Remove nearby obstacles
+              obstacles.splice(i, 1);
+              const explodeRadius = 100;
+              for (let j = obstacles.length - 1; j >= 0; j--) {
+                const dist = Math.hypot(obstacles[j].x - projectile.x, obstacles[j].y - projectile.y);
+                if (dist < explodeRadius) {
+                  obstacles.splice(j, 1);
+                }
+              }
+            } else {
+              obstacles.splice(i, 1);
+            }
+            
+            createParticles(projectile.x, projectile.y, 10, theme.spike, true);
+            
+            if (!projectile.piercing) {
+              return false;
+            } else {
+              projectile.hitCount++;
+              if (projectile.hitCount >= 3) return false;
+            }
+          }
+        }
+        
+        // Check collision with boss
+        if (currentBoss) {
+          if (
+            projectile.x + projectile.width > currentBoss.x &&
+            projectile.x < currentBoss.x + currentBoss.width &&
+            projectile.y + projectile.height > currentBoss.y &&
+            projectile.y < currentBoss.y + currentBoss.height
+          ) {
+            currentBoss.health -= 10;
+            setBossHealth(currentBoss.health);
+            createParticles(projectile.x, projectile.y, 15, currentBoss.color, true);
+            
+            if (currentBoss.health <= 0) {
+              // Boss defeated
+              markBossDefeated(currentBoss.id);
+              const coinsEarned = Math.floor(currentBoss.rewards.coins * prestigeBonuses.coinMultiplier);
+              addCoins(coinsEarned);
+              setCurrentBoss(null);
+              if (isSoundEnabled) soundManager.powerUp();
+            }
+            
+            if (!projectile.piercing) {
+              return false;
+            }
+          }
+        }
+        
+        return projectile.x < canvas.width + 100;
+      });
+      
+      // Update boss projectiles
+      bossProjectilesRef.current = bossProjectilesRef.current.filter((projectile) => {
+        projectile.x += projectile.vx;
+        projectile.y += projectile.vy;
+        
+        // Check collision with player
+        if (
+          !activePowerUp &&
+          projectile.x + projectile.width > playerX &&
+          projectile.x < playerX + playerSize &&
+          projectile.y + projectile.height > playerY &&
+          projectile.y < playerY + playerSize
+        ) {
+          if (activePowerUp !== "shield" && activePowerUp !== "invincibility" && !cheatMode) {
+            setGameOver(true);
+          }
+          return false;
+        }
+        
+        return projectile.x > -100 && projectile.x < canvas.width + 100 && projectile.y > -100 && projectile.y < canvas.height + 100;
+      });
+      
       // Update power-up timer
       const upgrades = getActiveUpgrades();
       if (powerUpTimer > 0) {
@@ -1197,6 +1424,10 @@ export const GeometryGame = () => {
     }} currentScore={score} />;
   }
 
+  if (showPrestige) {
+    return <Prestige onClose={() => setShowPrestige(false)} />;
+  }
+
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-b from-game-bg-start to-game-bg-end">
       <audio ref={audioRef} src="/game-music.mp3" loop />
@@ -1237,6 +1468,10 @@ export const GeometryGame = () => {
               <Button onClick={() => { setShowShop(true); setMenuOpen(false); }} variant="outline" className="justify-start">
                 <ShoppingBag className="mr-2 h-4 w-4" />
                 Item Shop
+              </Button>
+              <Button onClick={() => { setShowPrestige(true); setMenuOpen(false); }} variant="outline" className="justify-start">
+                <Crown className="mr-2 h-4 w-4" />
+                Prestige
               </Button>
               <Button onClick={() => { setShowSkins(true); setMenuOpen(false); }} variant="outline" className="justify-start">
                 <Palette className="mr-2 h-4 w-4" />

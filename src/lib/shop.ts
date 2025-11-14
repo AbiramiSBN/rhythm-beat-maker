@@ -125,6 +125,48 @@ export const SHOP_ITEMS: ShopItem[] = [
     effect: "combo-keeper",
     purchased: false,
   },
+  
+  // Weapon Upgrades
+  {
+    id: "basic-weapon",
+    name: "Basic Blaster",
+    description: "Shoot projectiles to destroy obstacles (Press F)",
+    icon: "🔫",
+    category: "ability",
+    cost: 2000,
+    effect: "basic-weapon",
+    purchased: false,
+  },
+  {
+    id: "rapid-fire",
+    name: "Rapid Fire",
+    description: "Shoot faster with reduced cooldown",
+    icon: "⚡",
+    category: "upgrade",
+    cost: 1500,
+    effect: "rapid-fire",
+    purchased: false,
+  },
+  {
+    id: "piercing-shots",
+    name: "Piercing Shots",
+    description: "Projectiles pierce through multiple obstacles",
+    icon: "💥",
+    category: "upgrade",
+    cost: 2000,
+    effect: "piercing-shots",
+    purchased: false,
+  },
+  {
+    id: "explosive-rounds",
+    name: "Explosive Rounds",
+    description: "Shots create explosions that destroy nearby obstacles",
+    icon: "💣",
+    category: "upgrade",
+    cost: 2500,
+    effect: "explosive-rounds",
+    purchased: false,
+  },
 ];
 
 export const getPurchasedItems = (): string[] => {
@@ -154,11 +196,12 @@ export const hasAbility = (abilityId: string): boolean => {
 
 export const getActiveUpgrades = () => {
   const purchased = getPurchasedItems();
+  
   return {
     shieldDuration: purchased.includes("shield-duration") ? 1.5 : 1,
     slowmoBost: purchased.includes("slow-motion-boost") ? 1.5 : 1,
     invincibilityBoost: purchased.includes("invincibility-boost") ? 2 : 1,
-    magnetRange: purchased.includes("magnet") ? 100 : 0,
+    magnetRange: purchased.includes("magnet") ? 150 : 0,
     scoreBoost: purchased.includes("score-boost") ? 1.25 : 1,
     coinBoost: purchased.includes("coin-boost") ? 1.5 : 1,
     comboKeeper: purchased.includes("combo-keeper"),
@@ -166,5 +209,8 @@ export const getActiveUpgrades = () => {
     dash: purchased.includes("dash"),
     wallJump: purchased.includes("wall-jump"),
     glide: purchased.includes("glide"),
+    rapidFire: purchased.includes("rapid-fire"),
+    piercingShots: purchased.includes("piercing-shots"),
+    explosiveRounds: purchased.includes("explosive-rounds"),
   };
 };
