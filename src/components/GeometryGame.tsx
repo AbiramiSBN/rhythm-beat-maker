@@ -17,7 +17,7 @@ import { updateGameStats } from "@/lib/achievements";
 import { SKINS, addCoins } from "@/lib/skins";
 import { getActiveUpgrades, hasAbility } from "@/lib/shop";
 import { getPrestigeBonuses, getHighestScore } from "@/lib/prestige";
-import { getBossForScore, markBossDefeated, Boss } from "@/components/BossBattle";
+import { getBossForScore, markBossDefeated, Boss } from "@/lib/bosses";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 interface Obstacle {
